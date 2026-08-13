@@ -118,7 +118,19 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Delete the managed address book, then receive matching mail. Confirm automatic filing and contact capture pause together, the message stays in Inbox, and setup is requested. Run setup successfully, re-enable automation, and confirm later matched mail moves and captures contacts again.
 - Disable automatic filing and confirm existing contacts remain. In a disposable profile, uninstall the extension and confirm its address book and contacts remain ordinary user-owned Thunderbird data.
 
-## 10. Scale, restart, and packaging
+## 10. Existing-mail customer-contact backfill
+
+- Complete **Save & set up folders**, place historical messages across two configured direct customer folders, and choose **Build address books from existing mail** in Settings. Confirm progress identifies the current account/folder and increases through every page.
+- Include messages older than 30 days and more than 1,000 messages total (4,000 is the target scale case). Confirm the action exhausts all pages and has no date, preview-limit, or message-count cutoff.
+- Confirm only enabled customers applicable to the enabled account are scanned. A configured customer's nested folders must be included, while disabled customers, customers scoped to another account, and unrelated sibling folders beneath or outside the customer root must not contribute contacts.
+- Include exact-domain, configured exact-address, unconfigured-subdomain, and account-identity addresses in From, To, Cc, and Bcc. Confirm only exact customer-owned, non-identity addresses are added to the customer attribution represented by their configured folder.
+- Put customer-looking addresses only in subject/body text and instrument `listInlineTextParts`; confirm no body is fetched. Instrument message move and folder create/update/delete APIs; confirm none is called.
+- Remove one configured customer folder and confirm it is skipped and reported without creating it. Then remove or invalidate approval of the customer root and confirm the scan fails closed before reading customer messages or adding contacts.
+- Put the same normalized address in multiple historical messages and customer folders, and pre-create another candidate in a different Thunderbird address book. Confirm the global address-book inventory is read once, each exact email is created at most once, and attribution is deterministic when the same candidate appears under multiple customers.
+- Simulate one contact-create failure between two successes. Confirm creation is sequential, later candidates continue, progress/final totals report the partial failure, and no messages or folders change.
+- Run the completed backfill again. Confirm every prior contact is reported as existing and no duplicate is created. Interrupt a large run, start it again, and confirm already-created contacts remain deduplicated.
+
+## 11. Scale, restart, and packaging
 
 - Set the preview limit to 25 and scan a folder with more than 25 messages; confirm the truncation banner appears.
 - Scan more than one Thunderbird message-list page and confirm all pages up to the limit are processed.

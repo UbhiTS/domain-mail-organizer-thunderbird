@@ -22,6 +22,10 @@ import {
   setupManagedContactBook,
   validateManagedContactBook
 } from "./lib/contact-book.js";
+import {
+  importExistingCustomerContacts,
+  scanExistingCustomerContacts
+} from "./lib/contact-backfill.js";
 import {normalizeManagedContactBooks} from "./lib/contact-state.js";
 import {messageFingerprint} from "./lib/fingerprint.js";
 import {proposeCustomersFromFolders} from "./lib/folder-import.js";
@@ -55,6 +59,7 @@ let baselineQueue = Promise.resolve();
 let stateMigrationQueue = Promise.resolve();
 let bulkReviewQueue = Promise.resolve();
 let contactQueue = Promise.resolve();
+let contactBackfillQueue = Promise.resolve();
 const AUTOMATIC_BASELINE_SCHEMA = 3;
 
 function incrementCount(counts, key, amount = 1) {
@@ -588,6 +593,155 @@ function enqueueContactMutation(operation) {
   return queued;
 }
 
+function enqueueContactBackfill(operation) {
+  const queued = contactBackfillQueue.catch(() => {}).then(operation);
+  contactBackfillQueue = queued;
+  return queued;
+}
+
+async function notifyContactBackfillProgress(progress) {
+  try {
+    await messenger.runtime.sendMessage({
+      dmo: true,
+      event: "contactBackfillProgress",
+      ...progress
+    });
+  } catch {
+    // The Settings page may have been closed. The user-requested scan should
+    // continue, and a later run remains safe because imports are deduplicated.
+  }
+}
+
+function emptyContactBackfillResult(account) {
+  return {
+    accountId: account.id,
+    accountName: account.name,
+    customersScanned: 0,
+    foldersTotal: 0,
+    foldersScanned: 0,
+    messagesScanned: 0,
+    attempted: 0,
+    created: 0,
+    existing: 0,
+    failed: 0,
+    skippedFolders: [],
+    errors: []
+  };
+}
+
+function contactBackfillTotals(accounts) {
+  const totals = {
+    accountsProcessed: accounts.length,
+    foldersScanned: 0,
+    messagesScanned: 0,
+    attempted: 0,
+    created: 0,
+    existing: 0,
+    failed: 0,
+    skippedFolders: 0
+  };
+  for (const account of accounts) {
+    totals.foldersScanned += account.foldersScanned ?? 0;
+    totals.messagesScanned += account.messagesScanned ?? 0;
+    totals.attempted += account.attempted ?? 0;
+    totals.created += account.created ?? 0;
+    totals.existing += account.existing ?? 0;
+    totals.failed += account.failed ?? 0;
+    totals.skippedFolders += account.skippedFolders?.length ?? 0;
+  }
+  return totals;
+}
+
+async function runContactBackfill() {
+  const state = await loadState();
+  const enabledAccounts = state.accounts.filter(
+    account => state.config.accounts?.[account.id]?.enabled
+  );
+  if (!enabledAccounts.length) {
+    throw new Error("Enable at least one mail account before building address books.");
+  }
+
+  const accounts = [];
+  for (const account of enabledAccounts) {
+    const result = emptyContactBackfillResult(account);
+    const accountConfig = state.config.accounts[account.id];
+    try {
+      if (!accountConfig.customerRootReady) {
+        throw new Error(
+          "The customer root is not approved. Run Save & set up folders first."
+        );
+      }
+      if (state.managedContactBookErrors?.[account.id]) {
+        throw new Error(
+          `${state.managedContactBookErrors[account.id]} Run Save & set up folders first.`
+        );
+      }
+      const storedBook = state.managedContactBooks?.[account.id];
+      if (!storedBook?.addressBookId) {
+        throw new Error(
+          "The managed customer address book is not ready. Run Save & set up folders first."
+        );
+      }
+
+      const scan = await scanExistingCustomerContacts({
+        account,
+        config: state.config,
+        api: messenger,
+        onProgress: progress => notifyContactBackfillProgress({
+          ...progress,
+          phase: "scan",
+          accountId: account.id,
+          accountName: account.name
+        })
+      });
+      Object.assign(result, {
+        customersScanned: scan.customersScanned ?? scan.groups?.length ?? 0,
+        foldersTotal: scan.foldersTotal ?? scan.customersTotal ?? 0,
+        foldersScanned: scan.foldersScanned ?? 0,
+        messagesScanned: scan.messagesScanned ?? 0,
+        skippedFolders: scan.skippedFolders ?? [],
+        errors: scan.errors ?? []
+      });
+
+      const imported = await enqueueContactMutation(() =>
+        importExistingCustomerContacts({
+          account,
+          storedBook,
+          groups: scan.groups ?? [],
+          api: messenger,
+          onProgress: progress => notifyContactBackfillProgress({
+            ...progress,
+            phase: "import",
+            accountId: account.id,
+            accountName: account.name,
+            messagesScanned: result.messagesScanned,
+            foldersScanned: result.foldersScanned,
+            foldersTotal: result.foldersTotal
+          })
+        })
+      );
+      Object.assign(result, {
+        attempted: imported.attempted ?? 0,
+        created: imported.created ?? 0,
+        existing: imported.existing ?? 0,
+        failed: imported.failed ?? 0,
+        errors: [
+          ...result.errors,
+          ...(imported.errors ?? [])
+        ]
+      });
+    } catch (error) {
+      result.errors.push(error.message);
+    }
+    accounts.push(result);
+  }
+
+  const totals = contactBackfillTotals(accounts);
+  const result = {accounts, totals};
+  await notifyContactBackfillProgress({phase: "complete", result, ...totals});
+  return result;
+}
+
 async function captureAutomaticContacts({accountId, config, completed}) {
   return enqueueContactMutation(async () => {
     const account = await getAccount(accountId);
@@ -835,6 +989,8 @@ async function handleCommand(message) {
         return {result, config: state.config, managedContactBooks};
       });
     }
+    case "backfillContacts":
+      return enqueueContactBackfill(runContactBackfill);
     case "discoverExistingFolders": {
       const account = await getAccount(message.accountId);
       const discovery = await discoverExistingCustomerFolders(

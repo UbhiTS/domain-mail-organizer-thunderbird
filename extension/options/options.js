@@ -17,6 +17,8 @@ const elements = {
   addCustomer: document.querySelector("#addCustomer"),
   save: document.querySelector("#save"),
   setupFolders: document.querySelector("#setupFolders"),
+  buildAddressBooks: document.querySelector("#buildAddressBooks"),
+  mailAccountsPanel: document.querySelector("#mailAccountsPanel"),
   export: document.querySelector("#export"),
   import: document.querySelector("#import"),
   importFile: document.querySelector("#importFile"),
@@ -33,6 +35,8 @@ const elements = {
 let bootstrap;
 let config;
 let folderImportContext = null;
+let contactBackfillRunning = false;
+let contactBackfillProgress = null;
 
 function send(command, extra = {}) {
   return messenger.runtime.sendMessage({dmo: true, command, ...extra});
@@ -53,6 +57,12 @@ function showStatus(message, error = false) {
   if (error) {
     elements.status.scrollIntoView({behavior: "smooth", block: "nearest"});
   }
+}
+
+function showProgress(message) {
+  elements.status.textContent = message;
+  elements.status.className = "banner progress";
+  elements.status.classList.remove("hidden");
 }
 
 function validateRawConfig(raw) {
@@ -78,6 +88,120 @@ function setBusy(busy) {
   for (const button of document.querySelectorAll("button")) {
     button.disabled = busy;
   }
+}
+
+function numeric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function plural(count, singular, pluralForm = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+function enabledBackfillAccounts() {
+  return bootstrap.accounts.filter(account => accountConfig(account.id).enabled);
+}
+
+function customerTotalForAccount(accountId) {
+  return config.customers.filter(customer =>
+    customer.enabled !== false &&
+    (!customer.accountIds?.length || customer.accountIds.includes(accountId))
+  ).length;
+}
+
+function renderContactBackfillProgress(message) {
+  if (!contactBackfillRunning) return;
+  if (message.phase === "complete") {
+    showProgress("Building address books — finalizing the summary…");
+    return;
+  }
+  const accountId = message.accountId ?? "";
+  const accounts = enabledBackfillAccounts();
+  const accountIndex = Math.max(0, accounts.findIndex(account => account.id === accountId));
+  const accountNumber = accounts.length ? accountIndex + 1 : 0;
+  const state = contactBackfillProgress ??= {customersByAccount: new Map()};
+  const seenCustomers = state.customersByAccount.get(accountId) ?? new Set();
+  if (message.customerId || message.customerName) {
+    seenCustomers.add(message.customerId || message.customerName);
+  }
+  state.customersByAccount.set(accountId, seenCustomers);
+
+  const importing = message.phase === "import" || message.phase === "importing";
+  const phase = importing ? "Importing contacts" : "Scanning existing mail";
+  const lines = [`Building address books — ${phase.toLocaleLowerCase()}…`];
+  if (message.accountName || accounts.length) {
+    lines.push(
+      `Account ${accountNumber} of ${accounts.length}: ${message.accountName || accountId || "Unknown account"}`
+    );
+  }
+  if (message.customerName) {
+    const customerTotal = numeric(message.customersTotal) || customerTotalForAccount(accountId);
+    const customerNumber = Math.max(seenCustomers.size, numeric(message.customersProcessed));
+    lines.push(
+      `Customer ${customerNumber}${customerTotal ? ` of ${customerTotal} configured` : ""}: ${message.customerName}` +
+      (message.folderName ? ` / ${message.folderName}` : "")
+    );
+  }
+  const folders = message.foldersTotal == null
+    ? plural(numeric(message.foldersScanned), "folder")
+    : `${numeric(message.foldersScanned)} of ${numeric(message.foldersTotal)} folders`;
+  lines.push([
+    folders,
+    plural(numeric(message.messagesScanned), "message"),
+    importing ? plural(numeric(message.attempted), "contact") + " attempted" : null,
+    importing ? `${numeric(message.created)} created` : null,
+    importing ? `${numeric(message.existing)} existing` : null,
+    importing ? `${numeric(message.failed)} failed` : null
+  ].filter((value, index, values) => value && values.indexOf(value) === index).join(" · "));
+  showProgress(lines.filter(Boolean).join("\n"));
+}
+
+function readableIssue(issue) {
+  if (typeof issue === "string") return issue;
+  if (!issue || typeof issue !== "object") return String(issue ?? "Unknown error");
+  return issue.reason ?? issue.message ?? JSON.stringify(issue);
+}
+
+function countItems(value) {
+  return Array.isArray(value) ? value.length : numeric(value);
+}
+
+function renderContactBackfillResult(result = {}) {
+  const accounts = Array.isArray(result.accounts) ? result.accounts : [];
+  const totals = result.totals ?? {};
+  const skippedTotal = countItems(totals.skippedFolders) ||
+    accounts.reduce((sum, account) => sum + countItems(account.skippedFolders), 0);
+  const errorsTotal = accounts.reduce(
+    (sum, account) => sum + countItems(account.errors),
+    countItems(totals.errors)
+  );
+  const lines = [
+    "Address-book build complete.",
+    `All enabled accounts: ${plural(numeric(totals.accountsProcessed) || accounts.length, "account")} · ${plural(numeric(totals.foldersScanned), "folder")} scanned · ${plural(numeric(totals.messagesScanned), "message")} scanned`,
+    `Contacts: ${numeric(totals.attempted)} attempted · ${numeric(totals.created)} created · ${numeric(totals.existing)} existing · ${numeric(totals.failed)} failed`,
+    `Skipped folders: ${skippedTotal} · Errors: ${errorsTotal}`
+  ];
+
+  for (const account of accounts) {
+    const accountSkipped = countItems(account.skippedFolders);
+    const accountErrors = countItems(account.errors);
+    lines.push(
+      "",
+      `${account.accountName || account.accountId || "Account"}: ${plural(numeric(account.customersScanned), "customer")} · ${plural(numeric(account.foldersScanned), "folder")} scanned · ${plural(numeric(account.messagesScanned), "message")} scanned · ${numeric(account.attempted)} attempted · ${numeric(account.created)} created · ${numeric(account.existing)} existing · ${numeric(account.failed)} failed · ${accountSkipped} skipped · ${accountErrors} errors`
+    );
+    for (const skipped of Array.isArray(account.skippedFolders) ? account.skippedFolders : []) {
+      const location = [skipped.customerName, skipped.folderName].filter(Boolean).join(" / ");
+      lines.push(`Skipped${location ? ` ${location}` : ""}: ${readableIssue(skipped)}`);
+    }
+    for (const error of Array.isArray(account.errors) ? account.errors : []) {
+      lines.push(`Error: ${readableIssue(error)}`);
+    }
+  }
+  showStatus(
+    lines.join("\n"),
+    errorsTotal > 0 || numeric(totals.failed) > 0 || skippedTotal > 0
+  );
 }
 
 function accountConfig(accountId) {
@@ -550,6 +674,34 @@ elements.folderImportDialog.addEventListener("close", () => {
   showFolderImportStatus();
 });
 elements.save.addEventListener("click", () => saveSettings());
+elements.buildAddressBooks.addEventListener("click", async () => {
+  const confirmed = window.confirm(
+    "Build address books from existing mail?\n\n" +
+    "This scans every message across all dates in the configured customer folders and their subfolders for all enabled accounts. " +
+    "It reads only From, To, Cc, and Bcc headers and applies your exact customer rules. " +
+    "Existing contacts are skipped. No messages or folders will be changed.\n\n" +
+    "Large mailboxes may take some time. Keep Thunderbird and this Settings tab open until the summary appears. " +
+    "If the run is interrupted, start it again; existing contacts will be skipped."
+  );
+  if (!confirmed) return;
+  if (!(await saveSettings(true))) return;
+
+  contactBackfillRunning = true;
+  contactBackfillProgress = {customersByAccount: new Map()};
+  setBusy(true);
+  elements.mailAccountsPanel.setAttribute("aria-busy", "true");
+  showProgress("Building address books — preparing enabled accounts…");
+  try {
+    renderContactBackfillResult(await send("backfillContacts"));
+  } catch (error) {
+    showStatus(`Could not build address books: ${error.message}`, true);
+  } finally {
+    contactBackfillRunning = false;
+    contactBackfillProgress = null;
+    elements.mailAccountsPanel.removeAttribute("aria-busy");
+    setBusy(false);
+  }
+});
 elements.setupFolders.addEventListener("click", async () => {
   // Approvals are intentionally one-use and are captured before saveSettings
   // rerenders the account cards. They never become durable configuration.
@@ -560,6 +712,10 @@ elements.setupFolders.addEventListener("click", async () => {
     const result = await send("setupFolders", {folderApprovals});
     config = result.config;
     bootstrap.managedContactBooks = result.managedContactBooks;
+    bootstrap.managedContactBookErrors ??= {};
+    for (const contactBook of result.result.contactBooks ?? []) {
+      delete bootstrap.managedContactBookErrors[contactBook.accountId];
+    }
     renderAccounts();
     const details = result.result.errors.length
       ? `\n${result.result.errors.join("\n")}`
@@ -574,6 +730,15 @@ elements.setupFolders.addEventListener("click", async () => {
   } finally {
     setBusy(false);
   }
+});
+
+messenger.runtime.onMessage.addListener(message => {
+  if (!message?.dmo || message.event !== "contactBackfillProgress") return;
+  if (message.phase === "complete" && message.result) {
+    renderContactBackfillResult(message.result);
+    return;
+  }
+  renderContactBackfillProgress(message);
 });
 elements.export.addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(collectConfig(), null, 2)], {type: "application/json"});

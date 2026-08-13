@@ -27,20 +27,23 @@
     </header>
 
     <main>
-      <div id="status" class="banner hidden" role="status" aria-live="polite"></div>
+      <div id="status" class="banner hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <section class="panel intro">
         <h2>Safe by default</h2>
         <p>Previews never move messages or create folders. Setup and explicit Apply actions can create folders. An existing root or archive folder is used only when you approve that exact name below. After setup, automatic filing can recreate a missing configured customer child, but never an unapproved or missing customer root. When automatic filing moves a matched message, its customer email contacts are also added to the managed address book. If that book becomes unavailable, both automatic actions pause together. Starred messages remain protected by default.</p>
       </section>
 
-      <section class="panel">
+      <section id="mailAccountsPanel" class="panel">
         <div class="section-heading">
           <div>
             <h2>Mail accounts</h2>
             <p>Each enabled account gets its own customer-folder tree; automatic moves never cross accounts.</p>
           </div>
-          <button id="setupFolders" class="secondary">Save &amp; set up folders</button>
+          <div class="section-actions">
+            <button id="buildAddressBooks" class="secondary" type="button" aria-controls="status">Build address books from existing mail</button>
+            <button id="setupFolders" class="secondary" type="button">Save &amp; set up folders</button>
+          </div>
         </div>
         <div id="accounts" class="account-grid"></div>
       </section>

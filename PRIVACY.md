@@ -15,6 +15,15 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   body to discover contacts. Before adding an address, it reads the user's
   address books to check for an exact normalized-email duplicate. It does not
   update, merge, or delete existing contacts.
+- Settings also provides a user-triggered existing-mail backfill. It reads only
+  the From, To, Cc, and Bcc headers from all dates in the enabled account's
+  configured direct customer folders and their subfolders, while excluding
+  unrelated sibling folders, and adds the same exact customer-owned
+  addresses to the already-set-up managed book. It does not read message
+  bodies, move or modify messages, or create, rename, or delete mail folders.
+  The scan exhausts all message-list pages without a message-count cap and may
+  take time for large or remote folders. Exact global deduplication makes a
+  completed or interrupted scan safe to run again.
 - If the managed address book is deleted, renamed, or becomes read-only,
   automatic filing and contact capture pause together until setup is repaired.
 - Optional body matching reads message text locally and is disabled by
