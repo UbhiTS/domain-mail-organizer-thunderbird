@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
 import {isRegistrableDomain, normalizeDomain, normalizeEmail} from "../lib/rules.js";
+import {internalDomainsFromIdentities} from "../lib/contacts.js";
 import {customersByName} from "../lib/sort.js";
 
 const elements = {
@@ -43,6 +44,19 @@ let config;
 let folderImportContext = null;
 let contactBackfillRunning = false;
 let contactBackfillProgress = null;
+
+const BROAD_CONSUMER_DOMAINS = new Set([
+  "aol.com",
+  "gmail.com",
+  "hotmail.com",
+  "icloud.com",
+  "live.com",
+  "msn.com",
+  "outlook.com",
+  "proton.me",
+  "protonmail.com",
+  "yahoo.com"
+]);
 
 function send(command, extra = {}) {
   return messenger.runtime.sendMessage({dmo: true, command, ...extra});
@@ -219,8 +233,53 @@ function accountConfig(accountId) {
     archiveFolderName: "Organizer Archive",
     archiveReady: false,
     autoFileIncoming: false,
-    autoFileSince: null
+    autoFileSince: null,
+    internalContactDomains: []
   };
+}
+
+function internalDomainLabels(domains) {
+  return domains.map(domain => `@${domain}`).join(", ");
+}
+
+function renderInternalContactSetting(card, account, value) {
+  const help = card.querySelector(".internal-contacts-help");
+  const options = card.querySelector(".internal-domain-options");
+  const detected = internalDomainsFromIdentities(account.identities);
+  const saved = value.internalContactDomains ?? [];
+  const savedSet = new Set(saved);
+  options.replaceChildren();
+
+  if (!detected.length) {
+    help.textContent = saved.length
+      ? `Saved approval for ${internalDomainLabels(saved)} is paused because no current Thunderbird identity verifies it. Add or restore the identity, then save again.`
+      : "No eligible domain was found in this account's identities, so internal capture cannot be enabled.";
+    return;
+  }
+
+  help.textContent = "Select each exact identity domain you want treated as internal. Used after automatic customer moves and by Build address books from existing mail. Your own identity addresses are excluded; subdomains are not included.";
+  const stale = saved.filter(domain => !detected.includes(domain));
+  if (stale.length) {
+    help.textContent += ` No current identity verifies ${internalDomainLabels(stale)}, so it will be removed when you save.`;
+  }
+  for (const domain of detected) {
+    const label = document.createElement("label");
+    label.className = "internal-domain-option";
+    const checkbox = document.createElement("input");
+    checkbox.className = "capture-internal-domain";
+    checkbox.type = "checkbox";
+    checkbox.value = domain;
+    checkbox.checked = savedSet.has(domain);
+    const text = document.createElement("span");
+    text.textContent = `@${domain}`;
+    label.append(checkbox, text);
+    options.append(label);
+    if (BROAD_CONSUMER_DOMAINS.has(domain)) {
+      const caution = document.createElement("small");
+      caution.textContent = `Caution: @${domain} is a shared consumer domain and may add unrelated people.`;
+      label.append(caution);
+    }
+  }
 }
 
 function updateManualToolsReadiness() {
@@ -488,6 +547,7 @@ function renderAccounts() {
       () => discoverCustomerFolders(card)
     );
     const autoFile = card.querySelector(".auto-file");
+    renderInternalContactSetting(card, account, value);
     const contactsReady = Boolean(
       bootstrap.managedContactBooks?.[account.id]?.addressBookId &&
       !bootstrap.managedContactBookErrors?.[account.id]
@@ -502,7 +562,7 @@ function renderAccounts() {
       autoFile.disabled = !automationReady;
       if (!automationReady) autoFile.checked = false;
       autoHelp.textContent = automationReady
-        ? "Sender/recipient rules only. After each matched move, customer email contacts are added to the address book. A successful manual preview is recommended first."
+        ? "Sender/recipient rules only. After each matched move, customer contacts and any approved internal coworkers are added to the address book. A successful manual preview is recommended first."
         : rootReady
           ? bootstrap.managedContactBookErrors?.[account.id] ||
             "Run Save & set up folders to create the managed customer address book."
@@ -640,11 +700,15 @@ function collectConfig() {
   next.preserveFlagged = elements.preserveFlagged.checked;
   next.accounts = {};
   for (const card of elements.accounts.querySelectorAll(".account-card")) {
+    const internalContactDomains = [
+      ...card.querySelectorAll(".capture-internal-domain:checked")
+    ].map(input => input.value);
     next.accounts[card.dataset.accountId] = {
       enabled: card.querySelector(".account-enabled").checked,
       rootFolderName: card.querySelector(".root-folder").value,
       archiveFolderName: card.querySelector(".archive-folder").value,
-      autoFileIncoming: card.querySelector(".auto-file").checked
+      autoFileIncoming: card.querySelector(".auto-file").checked,
+      internalContactDomains
     };
   }
   next.customers = [...elements.customers.querySelectorAll(".customer-card")].map(card => ({
@@ -758,7 +822,7 @@ elements.buildAddressBooks.addEventListener("click", async () => {
   const confirmed = window.confirm(
     "Build address books from existing mail?\n\n" +
     "This scans every message across all dates in the configured customer folders and their subfolders for all enabled accounts. " +
-    "It reads only From, To, Cc, and Bcc headers and applies your exact customer rules. " +
+    "It reads only From, To, Cc, and Bcc headers and applies your exact customer rules plus any exact internal domains you enabled for each account. " +
     "Existing contacts are skipped. No messages or folders will be changed.\n\n" +
     "Large mailboxes may take some time. Keep Thunderbird and this Settings tab open until the summary appears. " +
     "If the run is interrupted, start it again; existing contacts will be skipped."

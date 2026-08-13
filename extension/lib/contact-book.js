@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
 import {
+  approvedInternalDomains,
   createContactVCard,
   emailsFromVCard,
-  extractCustomerContacts,
+  extractManagedContactCandidates,
   normalizeContactCandidates
 } from "./contacts.js";
 import {customerById} from "./config.js";
+import {domainFromEmail} from "./rules.js";
 
 export const MANAGED_CONTACT_BOOK_PREFIX = "Customer Contacts — ";
 
@@ -186,20 +188,43 @@ function completedStatus({attempted, created, existing, failed}) {
   return created || existing ? "partial" : "failed";
 }
 
+function normalizedManagedContactGroups(groups) {
+  const rows = [];
+  const indexes = new Map();
+  for (const group of groups ?? []) {
+    const organization = typeof group?.organization === "string"
+      ? group.organization.trim().normalize("NFC")
+      : "";
+    for (const candidate of normalizeContactCandidates(group?.candidates)) {
+      const existingIndex = indexes.get(candidate.email);
+      if (existingIndex === undefined) {
+        indexes.set(candidate.email, rows.length);
+        rows.push({candidate, organization});
+      } else if (!rows[existingIndex].candidate.name && candidate.name) {
+        rows[existingIndex] = {
+          ...rows[existingIndex],
+          candidate
+        };
+      }
+    }
+  }
+  return rows;
+}
+
 /**
- * Import candidates into an already-owned managed address book. This function
- * never creates or adopts an address book. Email deduplication is global across
- * every address book in the current Thunderbird profile.
+ * Import multiple organization groups with one validation and one global
+ * address-book inventory. An email in more than one group belongs to the first
+ * group, allowing callers to put higher-priority groups first.
  */
-export async function importManagedContacts(
+export async function importManagedContactGroups(
   account,
   storedBook,
-  candidates,
-  organization = "",
+  groups,
   api = globalThis.messenger
 ) {
-  const normalized = normalizeContactCandidates(candidates);
-  if (!normalized.length) {
+  const rows = normalizedManagedContactGroups(groups);
+  const normalized = rows.map(row => row.candidate);
+  if (!rows.length) {
     return {
       status: "no-contacts",
       attempted: 0,
@@ -265,7 +290,7 @@ export async function importManagedContacts(
     failed: 0,
     results: []
   };
-  for (const candidate of normalized) {
+  for (const {candidate, organization} of rows) {
     if (existingEmails.has(candidate.email)) {
       summary.existing += 1;
       summary.results.push({email: candidate.email, status: "existing"});
@@ -297,9 +322,29 @@ export async function importManagedContacts(
 }
 
 /**
+ * Import candidates into an already-owned managed address book. This function
+ * never creates or adopts an address book. Email deduplication is global across
+ * every address book in the current Thunderbird profile.
+ */
+export async function importManagedContacts(
+  account,
+  storedBook,
+  candidates,
+  organization = "",
+  api = globalThis.messenger
+) {
+  return importManagedContactGroups(
+    account,
+    storedBook,
+    [{organization, candidates}],
+    api
+  );
+}
+
+/**
  * Extract and import contacts only from messages whose automatic customer move
- * completed. Candidates are grouped by the customer that owned the move so a
- * message can never contribute addresses owned by a different rule.
+ * completed. Exact internal-domain groups take precedence, while remaining
+ * candidates stay grouped by the customer that owned the move.
  */
 export async function captureMovedMessageContacts({
   account,
@@ -311,45 +356,61 @@ export async function captureMovedMessageContacts({
   const ownIdentityEmails = (account?.identities ?? [])
     .map(identity => identity?.email)
     .filter(Boolean);
+  const internalDomains = approvedInternalDomains(
+    account?.identities,
+    config?.accounts?.[account?.id]?.internalContactDomains
+  );
+  const byInternalDomain = new Map();
   const byCustomer = new Map();
   for (const entry of completed ?? []) {
     const customer = customerById(config, entry?.item?.customerId);
     if (!customer || !entry?.message) continue;
-    const candidates = await extractCustomerContacts(
+    const candidates = await extractManagedContactCandidates(
       entry.message,
       customer,
+      internalDomains,
       ownIdentityEmails,
       api
     );
+    for (const candidate of candidates.internal) {
+      const domain = domainFromEmail(candidate.email);
+      if (!domain) continue;
+      if (!byInternalDomain.has(domain)) {
+        byInternalDomain.set(domain, []);
+      }
+      byInternalDomain.get(domain).push(candidate);
+    }
     if (!byCustomer.has(customer.id)) {
       byCustomer.set(customer.id, {customer, candidates: []});
     }
-    byCustomer.get(customer.id).candidates.push(...candidates);
+    byCustomer.get(customer.id).candidates.push(...candidates.customer);
   }
 
+  const groups = [
+    ...[...byInternalDomain].map(([domain, candidates]) => ({
+      organization: domain,
+      candidates
+    })),
+    ...[...byCustomer.values()].map(({customer, candidates}) => ({
+      organization: customer.name,
+      candidates
+    }))
+  ];
+  const result = await importManagedContactGroups(
+    account,
+    storedBook,
+    groups,
+    api
+  );
   const summary = {
-    attempted: 0,
-    created: 0,
-    existing: 0,
-    failed: 0
+    attempted: result.attempted,
+    created: result.created,
+    existing: result.existing,
+    failed: result.failed
   };
-  const errors = [];
-  for (const {customer, candidates} of byCustomer.values()) {
-    const result = await importManagedContacts(
-      account,
-      storedBook,
-      candidates,
-      customer.name,
-      api
-    );
-    summary.attempted += result.attempted;
-    summary.created += result.created;
-    summary.existing += result.existing;
-    summary.failed += result.failed;
-    for (const row of result.results ?? []) {
-      if (row.status === "failed" && row.error) errors.push(row.error);
-    }
-  }
+  const errors = (result.results ?? [])
+    .filter(row => row.status === "failed" && row.error)
+    .map(row => row.error);
   if (errors.length) {
     summary.error = [...new Set(errors)].slice(0, 3).join("; ");
   }

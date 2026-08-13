@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   captureMovedMessageContacts,
+  importManagedContactGroups,
   importManagedContacts,
   managedContactBookName,
   setupManagedContactBook,
@@ -316,6 +317,63 @@ test("import deduplicates exact normalized emails across every address book", as
   assert.match(created[0].vCard, /ORG:Acme\\, Inc\.\r\n/u);
 });
 
+test("group import inventories address books once and assigns duplicate emails to the first group", async () => {
+  let bookListCalls = 0;
+  const contactListCalls = [];
+  const created = [];
+  const api = {
+    addressBooks: {
+      list: async () => {
+        bookListCalls += 1;
+        return [
+          addressBook("personal", "Personal Address Book"),
+          addressBook("managed")
+        ];
+      },
+      contacts: {
+        list: async bookId => {
+          contactListCalls.push(bookId);
+          return [];
+        },
+        create: async (bookId, vCard) => {
+          created.push({bookId, vCard});
+          return `created-${created.length}`;
+        }
+      }
+    }
+  };
+
+  const result = await importManagedContactGroups(
+    account,
+    "managed",
+    [
+      {
+        organization: "google.com",
+        candidates: [
+          {name: "Employee", email: "employee@google.com"}
+        ]
+      },
+      {
+        organization: "Customer Google",
+        candidates: [
+          {name: "Duplicate", email: "EMPLOYEE@google.com"},
+          {name: "Customer", email: "customer@example.com"}
+        ]
+      }
+    ],
+    api
+  );
+
+  assert.equal(bookListCalls, 1);
+  assert.deepEqual(contactListCalls, ["personal", "managed"]);
+  assert.equal(result.attempted, 2);
+  assert.equal(result.created, 2);
+  assert.equal(created.length, 2);
+  assert.match(created[0].vCard, /EMAIL:employee@google\.com\r\nORG:google\.com\r\n/u);
+  assert.doesNotMatch(created[0].vCard, /Customer Google/u);
+  assert.match(created[1].vCard, /EMAIL:customer@example\.com\r\nORG:Customer Google\r\n/u);
+});
+
 test("a global contact scan failure fails closed before creating anything", async () => {
   let contactCreateCalls = 0;
   const api = {
@@ -458,4 +516,118 @@ test("completed automatic moves capture only customer-owned non-identity contact
   assert.equal(created[0].bookId, "managed");
   assert.match(created[0].vCard, /EMAIL:alice@acme\.example\r\n/u);
   assert.doesNotMatch(created[0].vCard, /me@|mail\.acme|outside@/u);
+});
+
+test("automatic capture imports exact internal and customer groups with one global inventory", async () => {
+  let bookListCalls = 0;
+  const contactListCalls = [];
+  const created = [];
+  const identityBookName = "Customer Contacts â€” ubhi@google.com (work)";
+  const api = {
+    messengerUtilities: {
+      parseMailboxString: async value => {
+        const email = String(value).match(/[\w.+-]+@[\w.-]+/u)?.[0] ?? "";
+        return email ? [{name: String(value).split("<", 1)[0].trim(), email}] : [];
+      }
+    },
+    addressBooks: {
+      list: async () => {
+        bookListCalls += 1;
+        return [
+          addressBook("personal", "Personal Address Book"),
+          addressBook("managed", identityBookName)
+        ];
+      },
+      contacts: {
+        list: async bookId => {
+          contactListCalls.push(bookId);
+          return [];
+        },
+        create: async (bookId, vCard) => {
+          created.push({bookId, vCard});
+          return `contact-${created.length}`;
+        }
+      }
+    }
+  };
+  const config = {
+    accounts: {
+      work: {internalContactDomains: ["google.com", "unapproved.example"]}
+    },
+    customers: [
+      {
+        id: "acme",
+        name: "Acme",
+        domains: ["acme.example", "google.com"],
+        addresses: []
+      },
+      {
+        id: "beta",
+        name: "Beta",
+        domains: ["beta.example"],
+        addresses: []
+      }
+    ]
+  };
+
+  const result = await captureMovedMessageContacts({
+    account: {...account, identities: [{email: "ubhi@google.com"}]},
+    storedBook: {
+      addressBookId: "managed",
+      addressBookName: identityBookName
+    },
+    config,
+    completed: [
+      {
+        item: {customerId: "acme"},
+        message: {
+          author: "Alice <alice@acme.example>",
+          recipients: [
+            "Employee <employee@google.com>",
+            "Me <ubhi@google.com>",
+            "Unapproved <person@unapproved.example>"
+          ],
+          ccList: ["Subdomain <mailer@em.google.com>"],
+          bccList: []
+        }
+      },
+      {
+        item: {customerId: "beta"},
+        message: {
+          author: "Bob <bob@beta.example>",
+          recipients: [
+            "Employee <employee@google.com>",
+            "Colleague <colleague@google.com>"
+          ],
+          ccList: [],
+          bccList: ["Outside <outside@example.net>"]
+        }
+      }
+    ],
+    api
+  });
+
+  assert.deepEqual(result, {
+    attempted: 4,
+    created: 4,
+    existing: 0,
+    failed: 0
+  });
+  assert.equal(bookListCalls, 1);
+  assert.deepEqual(contactListCalls, ["personal", "managed"]);
+  assert.deepEqual(
+    created.map(item => item.vCard.match(/EMAIL:([^\r]+)/u)?.[1]),
+    [
+      "employee@google.com",
+      "colleague@google.com",
+      "alice@acme.example",
+      "bob@beta.example"
+    ]
+  );
+  assert.match(created[0].vCard, /ORG:google\.com\r\n/u);
+  assert.equal(created.some(entry => entry.vCard.includes("person@unapproved.example")), false);
+  assert.match(created[1].vCard, /ORG:google\.com\r\n/u);
+  assert.match(created[2].vCard, /ORG:Acme\r\n/u);
+  assert.match(created[3].vCard, /ORG:Beta\r\n/u);
+  assert.equal(created.some(item => /ubhi@|em\.google|outside@/u.test(item.vCard)), false);
 });

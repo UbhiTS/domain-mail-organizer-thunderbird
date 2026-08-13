@@ -20,6 +20,7 @@ Run these checks on Thunderbird 140 ESR or newer with a disposable profile and t
 - Export settings, change a value, import the JSON, and save it.
 - Import a configuration scoped to an unavailable account and confirm it is rejected instead of silently becoming global.
 - Open two Settings tabs, save different changes from both, and confirm every older preview is invalidated.
+- Confirm internal contact capture is off by default. For account identities on more than one domain, confirm each exact domain has its own unchecked choice. Select only `@google.com` for `ubhi@google.com`, verify Settings saves only `google.com`, and confirm shared consumer-mail domains show a warning. Confirm an imported internal domain that is not one of the account's identity domains is rejected.
 
 ## 3. Folder setup
 
@@ -112,6 +113,8 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Complete **Save & set up folders**, enable automatic filing, and receive a message that automatically moves to a customer folder. Confirm customer-owned addresses from its From, To, Cc, and Bcc headers are added to that account's managed `Customer Contacts — …` book only after the move is accepted.
 - Put several customer-owned addresses in one message and confirm each unique normalized address is added once with its available display name.
 - Include the enabled account's own primary address and aliases/identities in the headers; confirm none of those addresses are added.
+- Enable internal capture for an account with identity `ubhi@google.com`. In one automatically moved customer message include `coworker@google.com`, `person@mail.google.com`, and `person@notgoogle.com`; confirm only `coworker@google.com` is added as internal with `ORG:google.com`. The account's own identities must still be excluded.
+- Disable internal capture and repeat with a new `@google.com` address; confirm it is not added. For a personal-provider test identity such as `person@gmail.com`, confirm the feature remains off until explicitly enabled.
 - With only `shutterfly.com` configured, include both `person@shutterfly.com` and `person@em.shutterfly.com`; confirm only the exact configured-domain address is added. Then configure the subdomain for a separate customer and confirm it is captured only for that customer's automatic move.
 - Configure one exact shared-provider address, such as `customer.contact@gmail.com`, alongside an unrelated Gmail address; confirm only the configured exact address is added.
 - Pre-create the same normalized email address in the managed book, then in a different Thunderbird address book. In both cases, confirm a later automatic move creates no duplicate anywhere.
@@ -126,6 +129,7 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Include messages older than 30 days and more than 1,000 messages total (4,000 is the target scale case). Confirm the action exhausts all pages and has no date, preview-limit, or message-count cutoff.
 - Confirm only enabled customers applicable to the enabled account are scanned. A configured customer's nested folders must be included, while disabled customers, customers scoped to another account, and unrelated sibling folders beneath or outside the customer root must not contribute contacts.
 - Include exact-domain, configured exact-address, unconfigured-subdomain, and account-identity addresses in From, To, Cc, and Bcc. Confirm only exact customer-owned, non-identity addresses are added to the customer attribution represented by their configured folder.
+- With internal capture approved for `google.com`, place the same coworker on messages in several customer folders. Confirm the single existing-mail scan creates that employee once with `ORG:google.com`, does not attribute the employee to either customer, and performs no second message scan.
 - Put customer-looking addresses only in subject/body text and instrument `listInlineTextParts`; confirm no body is fetched. Instrument message move and folder create/update/delete APIs; confirm none is called.
 - Remove one configured customer folder and confirm it is skipped and reported without creating it. Then remove or invalidate approval of the customer root and confirm the scan fails closed before reading customer messages or adding contacts.
 - Put the same normalized address in multiple historical messages and customer folders, and pre-create another candidate in a different Thunderbird address book. Confirm the global address-book inventory is read once, each exact email is created at most once, and attribution is deterministic when the same candidate appears under multiple customers.

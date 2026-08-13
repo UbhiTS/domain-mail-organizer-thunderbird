@@ -31,7 +31,8 @@ export const DEFAULT_ACCOUNT_CONFIG = Object.freeze({
   archiveFolderName: "Organizer Archive",
   archiveReady: false,
   autoFileIncoming: false,
-  autoFileSince: null
+  autoFileSince: null,
+  internalContactDomains: []
 });
 
 export const SOURCE_LABELS = Object.freeze({

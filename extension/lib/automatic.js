@@ -248,12 +248,12 @@ export function createAutomaticFiler({
           }
         } catch (error) {
           contacts.failed = completed.length;
-          contactError = `Customer contact capture failed: ${error.message}`;
+          contactError = `Contact capture failed: ${error.message}`;
         }
       }
       if (!contactError && contacts.failed) {
         contactError = contacts.error ??
-          `${contacts.failed} customer contact${contacts.failed === 1 ? "" : "s"} could not be added`;
+          `${contacts.failed} contact${contacts.failed === 1 ? "" : "s"} could not be added`;
       }
       const moveError = result.failed ? describeFailures(result.results) : undefined;
       const error = [moveError, contactError].filter(Boolean).join("; ") || undefined;

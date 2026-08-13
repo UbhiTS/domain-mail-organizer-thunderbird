@@ -9,17 +9,22 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
 - **Save & set up folders** creates one uniquely named local address book per
   enabled account. After an enabled automatic Inbox move,
   the extension can add customer-owned addresses found in that message's From,
-  To, Cc, and Bcc headers to the account's managed book.
-- Contact capture uses only exact configured customer domains and email
-  addresses, excludes the account's own identities, and never reads a message
-  body to discover contacts. Before adding an address, it reads the user's
+  To, Cc, and Bcc headers to the account's managed book. If the user explicitly
+  selects internal domains for that account, the same headers can also add
+  coworkers at the exact domains individually shown and approved in Settings. Those domains
+  are derived from the account's configured Thunderbird identities; for
+  `ubhi@google.com`, the proposed exact domain is `google.com`.
+- Contact capture uses exact configured customer domains/email addresses and
+  exact approved internal domains. It excludes all of the account's own
+  identities and never reads a message body to discover contacts. It does not
+  treat subdomains as internal. Before adding an address, it reads the user's
   address books to check for an exact normalized-email duplicate. It does not
   update, merge, or delete existing contacts.
 - Settings also provides a user-triggered existing-mail backfill. It reads only
   the From, To, Cc, and Bcc headers from all dates in the enabled account's
   configured direct customer folders and their subfolders, while excluding
-  unrelated sibling folders, and adds the same exact customer-owned
-  addresses to the already-set-up managed book. It does not read message
+  unrelated sibling folders, and adds the same customer-owned and explicitly
+  approved internal addresses to the already-set-up managed book. It does not read message
   bodies, move or modify messages, or create, rename, or delete mail folders.
   The scan exhausts all message-list pages without a message-count cap and may
   take time for large or remote folders. Exact global deduplication makes a

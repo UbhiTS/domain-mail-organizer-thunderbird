@@ -1,6 +1,11 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
-import {domainFromEmail, normalizeDomain, normalizeEmail} from "./rules.js";
+import {
+  domainFromEmail,
+  isRegistrableDomain,
+  normalizeDomain,
+  normalizeEmail
+} from "./rules.js";
 
 function stringValues(value) {
   if (Array.isArray(value)) {
@@ -96,6 +101,70 @@ export async function parseMailboxCandidates(values, api = globalThis.messenger)
 }
 
 /**
+ * Derive the exact organization domains represented by an account's identities.
+ * Public suffixes and malformed identity addresses are deliberately ignored.
+ */
+export function internalDomainsFromIdentities(identities) {
+  const domains = [];
+  const seen = new Set();
+  for (const identity of identities ?? []) {
+    const email = normalizeEmail(
+      typeof identity === "string" ? identity : identity?.email
+    );
+    const domain = domainFromEmail(email);
+    if (!domain || seen.has(domain) || !isRegistrableDomain(domain)) {
+      continue;
+    }
+    seen.add(domain);
+    domains.push(domain);
+  }
+  return domains;
+}
+
+/**
+ * Keep only configured internal domains that are still represented by a
+ * current identity on the same Thunderbird account.
+ */
+export function approvedInternalDomains(identities, configuredDomains) {
+  const identityDomains = new Set(internalDomainsFromIdentities(identities));
+  const approved = [];
+  const seen = new Set();
+  for (const value of configuredDomains ?? []) {
+    const domain = normalizeDomain(value);
+    if (!domain || seen.has(domain) || !identityDomains.has(domain)) {
+      continue;
+    }
+    seen.add(domain);
+    approved.push(domain);
+  }
+  return approved;
+}
+
+/** Parse every address-bearing header on a message exactly once. */
+export async function parseMessageContactCandidates(
+  header,
+  api = globalThis.messenger
+) {
+  return parseMailboxCandidates(
+    [
+      header?.author,
+      header?.recipients ?? [],
+      header?.ccList ?? [],
+      header?.bccList ?? []
+    ],
+    api
+  );
+}
+
+function normalizedOwnIdentityEmails(ownIdentityEmails) {
+  return new Set(
+    (ownIdentityEmails ?? [])
+      .map(value => normalizeEmail(typeof value === "string" ? value : value?.email))
+      .filter(Boolean)
+  );
+}
+
+/**
  * Keep only exact addresses or exact domains configured for one customer.
  * Configuring example.com deliberately does not include sub.example.com.
  */
@@ -110,16 +179,57 @@ export function filterCustomerContactCandidates(
   const domains = new Set(
     (customer?.domains ?? []).map(normalizeDomain).filter(Boolean)
   );
-  const ownAddresses = new Set(
-    (ownIdentityEmails ?? [])
-      .map(value => normalizeEmail(typeof value === "string" ? value : value?.email))
-      .filter(Boolean)
-  );
+  const ownAddresses = normalizedOwnIdentityEmails(ownIdentityEmails);
 
   return normalizeContactCandidates(candidates).filter(candidate =>
     !ownAddresses.has(candidate.email) &&
     (addresses.has(candidate.email) || domains.has(domainFromEmail(candidate.email)))
   );
+}
+
+/**
+ * Keep candidates whose address has one of the configured exact internal
+ * domains. A configured domain does not include any of its subdomains.
+ */
+export function filterInternalContactCandidates(
+  candidates,
+  internalDomains,
+  ownIdentityEmails = []
+) {
+  const domains = new Set(
+    (internalDomains ?? []).map(normalizeDomain).filter(isRegistrableDomain)
+  );
+  const ownAddresses = normalizedOwnIdentityEmails(ownIdentityEmails);
+  return normalizeContactCandidates(candidates).filter(candidate =>
+    !ownAddresses.has(candidate.email) &&
+    domains.has(domainFromEmail(candidate.email))
+  );
+}
+
+/**
+ * Parse a message once, then partition its managed contacts. Internal-domain
+ * ownership takes precedence when a candidate also matches the customer rule.
+ */
+export async function extractManagedContactCandidates(
+  header,
+  customer,
+  internalDomains = [],
+  ownIdentityEmails = [],
+  api = globalThis.messenger
+) {
+  const candidates = await parseMessageContactCandidates(header, api);
+  const internal = filterInternalContactCandidates(
+    candidates,
+    internalDomains,
+    ownIdentityEmails
+  );
+  const internalEmails = new Set(internal.map(candidate => candidate.email));
+  const customerCandidates = filterCustomerContactCandidates(
+    candidates,
+    customer,
+    ownIdentityEmails
+  ).filter(candidate => !internalEmails.has(candidate.email));
+  return {customer: customerCandidates, internal};
 }
 
 /** Extract customer contacts from From, To, Cc, and Bcc message headers. */
@@ -129,15 +239,7 @@ export async function extractCustomerContacts(
   ownIdentityEmails = [],
   api = globalThis.messenger
 ) {
-  const candidates = await parseMailboxCandidates(
-    [
-      header?.author,
-      header?.recipients ?? [],
-      header?.ccList ?? [],
-      header?.bccList ?? []
-    ],
-    api
-  );
+  const candidates = await parseMessageContactCandidates(header, api);
   return filterCustomerContactCandidates(candidates, customer, ownIdentityEmails);
 }
 

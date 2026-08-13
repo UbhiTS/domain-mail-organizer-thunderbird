@@ -1,15 +1,17 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
 import {
+  approvedInternalDomains,
   createContactVCard,
   emailsFromVCard,
-  extractCustomerContacts,
+  extractManagedContactCandidates,
   normalizeContactCandidates
 } from "./contacts.js";
 import {customerAppliesToAccount} from "./config.js";
 import {validateManagedContactBook} from "./contact-book.js";
 import {resolveCustomerFolder, resolveCustomerRoot} from "./folders.js";
 import {iterateMessageList} from "./mail.js";
+import {domainFromEmail} from "./rules.js";
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -80,10 +82,11 @@ function scanProgress(result, customer, customersProcessed, customersTotal, stag
 
 /**
  * Read every message in each configured customer's existing direct folder and
- * extract only exact configured From/To/Cc/Bcc contacts. A customer's direct
- * folder and its descendants are included, but the customer root and unrelated
- * siblings are never scanned. This is intentionally read-only: it never reads
- * bodies, moves mail, or creates folders.
+ * extract exact configured customer contacts plus exact account-internal-domain
+ * contacts from From/To/Cc/Bcc. Internal contacts are accumulated account-wide.
+ * A customer's direct folder and its descendants are included, but the customer
+ * root and unrelated siblings are never scanned. This is intentionally read-only:
+ * it never reads bodies, moves mail, or creates folders.
  */
 export async function scanExistingCustomerContacts({
   account,
@@ -101,6 +104,14 @@ export async function scanExistingCustomerContacts({
   const ownIdentityEmails = (account.identities ?? [])
     .map(identity => identity?.email)
     .filter(Boolean);
+  const internalDomains = approvedInternalDomains(
+    account.identities,
+    accountConfig?.internalContactDomains
+  ).sort();
+  const internalDomainSet = new Set(internalDomains);
+  const internalCandidates = new Map(
+    internalDomains.map(domain => [domain, new Map()])
+  );
   const result = {
     status: "complete",
     accountId: id,
@@ -173,6 +184,9 @@ export async function scanExistingCustomerContacts({
     // Keep one candidate per normalized address so scanning a very large
     // folder does not retain one candidate object for every message.
     const folderCandidates = new Map();
+    const folderInternalCandidates = new Map(
+      internalDomains.map(domain => [domain, new Map()])
+    );
     let folderMessages = 0;
     let scanError = null;
     try {
@@ -185,16 +199,26 @@ export async function scanExistingCustomerContacts({
       for await (const message of iterateMessageList(firstPage, api)) {
         folderMessages += 1;
         result.messagesScanned += 1;
-        const messageCandidates = await extractCustomerContacts(
+        const messageCandidates = await extractManagedContactCandidates(
           message,
           customer,
+          internalDomains,
           ownIdentityEmails,
           api
         );
-        for (const candidate of messageCandidates) {
+        for (const candidate of messageCandidates.customer) {
           const existing = folderCandidates.get(candidate.email);
           if (!existing || (!existing.name && candidate.name)) {
             folderCandidates.set(candidate.email, candidate);
+          }
+        }
+        for (const candidate of messageCandidates.internal) {
+          const domain = domainFromEmail(candidate.email);
+          if (!internalDomainSet.has(domain)) continue;
+          const candidatesForDomain = folderInternalCandidates.get(domain);
+          const existing = candidatesForDomain.get(candidate.email);
+          if (!existing || (!existing.name && candidate.name)) {
+            candidatesForDomain.set(candidate.email, candidate);
           }
         }
         if (result.messagesScanned % 100 === 0) {
@@ -242,12 +266,23 @@ export async function scanExistingCustomerContacts({
     }
 
     const candidates = normalizeContactCandidates([...folderCandidates.values()]);
+    for (const domain of internalDomains) {
+      const accountCandidates = internalCandidates.get(domain);
+      for (const candidate of folderInternalCandidates.get(domain).values()) {
+        const existing = accountCandidates.get(candidate.email);
+        if (!existing || (!existing.name && candidate.name)) {
+          accountCandidates.set(candidate.email, candidate);
+        }
+      }
+    }
     result.foldersScanned += 1;
     result.customersScanned += 1;
     result.contactsFound += candidates.length;
     result.groups.push({
+      kind: "customer",
       customerId: customer.id,
       customerName: customer.name,
+      organization: customer.name,
       folderId: folder.id,
       folderName: folder.name,
       messagesScanned: folderMessages,
@@ -258,6 +293,21 @@ export async function scanExistingCustomerContacts({
       onProgress,
       scanProgress(result, customer, index + 1, customers.length, "folder-complete")
     );
+  }
+
+  for (const domain of internalDomains) {
+    const candidates = normalizeContactCandidates([
+      ...internalCandidates.get(domain).values()
+    ]);
+    if (!candidates.length) continue;
+    result.contactsFound += candidates.length;
+    result.groups.push({
+      kind: "internal",
+      organization: domain,
+      internalDomain: domain,
+      contactsFound: candidates.length,
+      candidates
+    });
   }
 
   await assertApprovedRoot(account, accountConfig, rootId, api);
@@ -279,11 +329,24 @@ function flattenGroups(groups) {
       entries.push({
         candidate,
         customerId: typeof group?.customerId === "string" ? group.customerId : "",
-        customerName: typeof group?.customerName === "string" ? group.customerName : ""
+        customerName: typeof group?.customerName === "string" ? group.customerName : "",
+        organization: typeof group?.organization === "string"
+          ? group.organization
+          : typeof group?.customerName === "string"
+            ? group.customerName
+            : ""
       });
     }
   }
   return entries;
+}
+
+function importResultRow(entry) {
+  return {
+    email: entry.candidate.email,
+    customerId: entry.customerId,
+    customerName: entry.customerName
+  };
 }
 
 function importStatus(summary) {
@@ -300,9 +363,7 @@ function failedImport(entries, status, message) {
     existing: 0,
     failed: entries.length,
     results: entries.map(entry => ({
-      email: entry.candidate.email,
-      customerId: entry.customerId,
-      customerName: entry.customerName,
+      ...importResultRow(entry),
       status: "failed",
       error: message
     })),
@@ -312,7 +373,7 @@ function failedImport(entries, status, message) {
 
 /**
  * Import a completed scan into an already-owned managed address book. The
- * first group containing an email deterministically owns its ORG value. No
+ * first group containing an email deterministically owns its organization. No
  * book is created/adopted and no existing contact is updated or deleted.
  */
 export async function importExistingCustomerContacts({
@@ -382,11 +443,7 @@ export async function importExistingCustomerContacts({
 
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
-    const row = {
-      email: entry.candidate.email,
-      customerId: entry.customerId,
-      customerName: entry.customerName
-    };
+    const row = importResultRow(entry);
     if (existingEmails.has(entry.candidate.email)) {
       summary.existing += 1;
       summary.results.push({...row, status: "existing"});
@@ -394,7 +451,7 @@ export async function importExistingCustomerContacts({
       try {
         const contactId = await api.addressBooks.contacts.create(
           managed.addressBookId,
-          createContactVCard(entry.candidate, entry.customerName)
+          createContactVCard(entry.candidate, entry.organization)
         );
         existingEmails.add(entry.candidate.email);
         summary.created += 1;

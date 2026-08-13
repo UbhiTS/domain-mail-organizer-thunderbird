@@ -5,6 +5,7 @@ import {
   DEFAULT_ACCOUNT_CONFIG,
   DEFAULT_CONFIG
 } from "./constants.js";
+import {internalDomainsFromIdentities} from "./contacts.js";
 import {
   isRegistrableDomain,
   normalizeDomain,
@@ -70,7 +71,11 @@ export function normalizeAccountConfig(value = {}) {
       value.autoFileIncoming,
       DEFAULT_ACCOUNT_CONFIG.autoFileIncoming
     ),
-    autoFileSince: normalizedTimestamp(value.autoFileSince)
+    autoFileSince: normalizedTimestamp(value.autoFileSince),
+    internalContactDomains: normalizedStringList(
+      value.internalContactDomains,
+      normalizeDomain
+    )
   };
 }
 
@@ -139,6 +144,7 @@ export function normalizeConfig(raw = {}, accounts = []) {
 export function validateConfig(config, accounts = []) {
   const errors = [];
   const availableAccounts = new Set(accounts.map(account => account.id));
+  const availableAccountDetails = new Map(accounts.map(account => [account.id, account]));
   const matcherOwners = new Map();
   const customerIds = new Set();
 
@@ -161,6 +167,20 @@ export function validateConfig(config, accounts = []) {
         accountConfig.archiveFolderName.normalize("NFC").toLocaleLowerCase()
     ) {
       errors.push("The customer root and organizer archive folders must have different names.");
+    }
+    const account = availableAccountDetails.get(accountId);
+    const identityDomains = internalDomainsFromIdentities(account?.identities);
+    const identityDomainSet = new Set(identityDomains);
+    for (const domain of accountConfig.internalContactDomains ?? []) {
+      if (!isRegistrableDomain(domain)) {
+        errors.push(
+          `Account ${account?.name ?? accountId}: internal contact domain ${domain} must include an organization name and cannot be a public suffix.`
+        );
+      } else if (account && !identityDomainSet.has(domain)) {
+        errors.push(
+          `Account ${account?.name ?? accountId}: internal contact domain ${domain} does not belong to a current account identity. Add or restore that Thunderbird identity before enabling internal capture.`
+        );
+      }
     }
   }
 

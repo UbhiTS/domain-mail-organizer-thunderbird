@@ -1,9 +1,9 @@
 # Thunderbird Add-ons submission notes
 
-Use this checklist when submitting version 0.1.11 to addons.thunderbird.net
+Use this checklist when submitting version 0.1.12 to addons.thunderbird.net
 (ATN).
 
-Before pasting the reviewer links below, manually create/push the `v0.1.11` tag
+Before pasting the reviewer links below, manually create/push the `v0.1.12` tag
 or publish the corresponding GitHub Release so the source snapshot exists.
 
 ## Validation screen
@@ -25,7 +25,11 @@ Paste the following into **Version notes**:
 > Adds automatic customer-contact capture paired with automatic Inbox filing.
 > Folder setup creates one managed local address book per enabled mail account;
 > after an accepted automatic move, exact customer-owned From/To/Cc/Bcc
-> addresses are added there. Capture globally deduplicates exact email
+> addresses are added there. Users may separately select exact domains derived
+> from each mail account's Thunderbird identities; matching coworkers are then
+> captured from the same customer-mail headers and tagged with that domain.
+> The user's own identities and all unapproved/subdomain addresses remain
+> excluded. Capture globally deduplicates exact email
 > addresses, excludes the account's own identities, never scans message bodies,
 > and never updates or deletes existing contacts.
 > A user-triggered Settings action can build the managed address book from all
@@ -56,7 +60,7 @@ Paste the following into **Notes for Reviewers**:
 >
 > Source repository and tag:
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.11
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.12
 >
 > The packaged JavaScript, HTML, and CSS are readable source files. There is no
 > minification, transpilation, bundling, obfuscation, eval, remote code, or
@@ -67,7 +71,7 @@ Paste the following into **Notes for Reviewers**:
 > 1. npm ci --ignore-scripts
 > 2. npm run check
 > 3. npm run build
-> Output: artifacts/domain-mail-organizer-0.1.11.xpi and .zip.
+> Output: artifacts/domain-mail-organizer-0.1.12.xpi and .zip.
 >
 > Third-party library: psl 1.15.0, vendored unmodified as
 > extension/vendor/psl.mjs. Source:
@@ -79,10 +83,11 @@ Paste the following into **Notes for Reviewers**:
 > - accountsRead: enumerate the user's configured Thunderbird accounts and
 >   folders.
 > - accountsFolders: create only explicitly configured organizer folders.
-> - addressBooks: create one managed local customer-contact book per enabled
+> - addressBooks: create one managed local contacts book per enabled
 >   account, check all address books for exact-email duplicates, and add exact
->   customer-owned header addresses following accepted automatic moves or the
->   reviewer's explicit existing-mail backfill request.
+>   customer-owned or explicitly approved identity-domain header addresses
+>   following accepted automatic moves or the reviewer's explicit existing-mail
+>   backfill request.
 > - messagesRead: read message headers and optional locally fetched body text
 >   for matching and previews.
 > - messagesMove: perform reviewed Apply actions and enabled automatic filing.
@@ -109,10 +114,16 @@ Paste the following into **Notes for Reviewers**:
 >    address is added once. Own identities, unconfigured subdomains, subject/body
 >    addresses, and addresses already present in any address book are not added.
 >    Previewed, manually applied, or externally moved messages do not add contacts.
+>    Optionally enable internal capture for an organization-owned test identity
+>    domain. Confirm an exact coworker address is added with that domain as ORG,
+>    while the reviewer's own identity and subdomain/lookalike addresses are not.
 > 8. Put existing messages in the configured direct customer folder and one of
 >    its subfolders, then choose Build address books from existing mail in
 >    Settings. Confirm it scans all dates/pages and adds exact customer-owned
->    From/To/Cc/Bcc addresses
+>    From/To/Cc/Bcc addresses. With internal capture enabled for the test
+>    identity domain, confirm an exact coworker is also added once with that
+>    domain as ORG, while subdomain/lookalike and own-identity addresses are not
+>    added
 >    without reading bodies or changing messages/folders. Run it again and
 >    confirm no exact-email duplicate is created.
 > 9. Select a direct customer folder and choose Customer Contacts List in the
@@ -126,7 +137,7 @@ Paste the following into **Notes for Reviewers**:
 > transmits no mailbox data or telemetry. It never updates, merges, or deletes
 > existing contacts. Managed books and contacts remain user-owned after the
 > feature is disabled or the extension is uninstalled. Privacy statement:
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.11/PRIVACY.md
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.12/PRIVACY.md
 
 ## Source-code upload field
 
@@ -134,7 +145,7 @@ The submitted XPI contains readable, unminified source and does not transform
 the runtime code, so a separate source upload is generally unnecessary. If ATN
 requests one, use the repository tag archive—not the installable release ZIP:
 
-https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.11.zip
+https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.12.zip
 
 The archive contains `package.json`, `package-lock.json`, the build script, and
 all extension sources required to reproduce the XPI.

@@ -1,9 +1,9 @@
 {
   "name": "domain-mail-organizer-thunderbird",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "type": "module",
-  "description": "A Thunderbird MailExtension that organizes customer email and captures customer contacts.",
+  "description": "A Thunderbird MailExtension that organizes customer email and captures customer and approved internal contacts.",
   "author": "Tarun Ubhi (UbhiTS)",
   "license": "MIT",
   "repository": {

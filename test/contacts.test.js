@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  approvedInternalDomains,
   createContactVCard,
   emailsFromVCard,
   extractCustomerContacts,
+  extractManagedContactCandidates,
   filterCustomerContactCandidates,
+  filterInternalContactCandidates,
+  internalDomainsFromIdentities,
   normalizeContactCandidates,
-  parseMailboxCandidates
+  parseMailboxCandidates,
+  parseMessageContactCandidates
 } from "../extension/lib/contacts.js";
 
 test("parses named mailboxes and nested groups through Thunderbird", async () => {
@@ -49,6 +54,25 @@ test("normalizes and deduplicates candidates while preserving the useful name", 
   ]);
 });
 
+test("derives unique exact internal domains from account identities", () => {
+  assert.deepEqual(internalDomainsFromIdentities([
+    {email: " Ubhi@GOOGLE.COM "},
+    "alias@google.com",
+    {email: "engineer@corp.google.com"},
+    {email: "invalid"},
+    {email: "person@co.uk"},
+    null
+  ]), ["google.com", "corp.google.com"]);
+});
+
+test("approves only configured domains represented by current identities", () => {
+  assert.deepEqual(approvedInternalDomains(
+    [{email: "ubhi@google.com"}, {email: "alias@corp.google.com"}],
+    ["GOOGLE.COM", "example.com", "corp.google.com", "google.com"]
+  ), ["google.com", "corp.google.com"]);
+  assert.deepEqual(approvedInternalDomains([], ["google.com"]), []);
+});
+
 test("sanitizes untrusted display names and caps their length", () => {
   const [candidate] = normalizeContactCandidates([{
     email: "person@example.com",
@@ -78,6 +102,83 @@ test("keeps exact customer domains and addresses but excludes own identities", (
     {name: "Alice", email: "alice@example.com"},
     {name: "Rail", email: "person@rail.parent.com"},
     {name: "Explicit", email: "special@outside.com"}
+  ]);
+});
+
+test("keeps only exact internal domains and excludes own identities", () => {
+  const result = filterInternalContactCandidates([
+    {name: "Coworker", email: "coworker@google.com"},
+    {name: "Me", email: "UBHI@google.com"},
+    {name: "Marketing", email: "mailer@em.google.com"},
+    {name: "Other", email: "person@example.com"}
+  ], ["@GOOGLE.COM", "co.uk", "invalid"], [{email: "ubhi@google.com"}]);
+
+  assert.deepEqual(result, [
+    {name: "Coworker", email: "coworker@google.com"}
+  ]);
+});
+
+test("parses every address header through one message-level operation", async () => {
+  const calls = [];
+  const api = {
+    messengerUtilities: {
+      parseMailboxString: async value => {
+        calls.push(value);
+        const email = String(value).match(/[\w.+-]+@[\w.-]+/u)?.[0] ?? "";
+        return email ? [{name: value.split("<", 1)[0].trim(), email}] : [];
+      }
+    }
+  };
+
+  assert.deepEqual(await parseMessageContactCandidates({
+    author: "From <from@example.com>",
+    recipients: ["To <to@example.com>"],
+    ccList: ["Copy <copy@example.com>"],
+    bccList: ["Hidden <hidden@example.com>"]
+  }, api), [
+    {name: "From", email: "from@example.com"},
+    {name: "To", email: "to@example.com"},
+    {name: "Copy", email: "copy@example.com"},
+    {name: "Hidden", email: "hidden@example.com"}
+  ]);
+  assert.deepEqual(calls, [
+    "From <from@example.com>",
+    "To <to@example.com>",
+    "Copy <copy@example.com>",
+    "Hidden <hidden@example.com>"
+  ]);
+});
+
+test("partitions contacts after one parse and gives exact internal domains priority", async () => {
+  const calls = [];
+  const api = {
+    messengerUtilities: {
+      parseMailboxString: async value => {
+        calls.push(value);
+        const email = String(value).match(/[\w.+-]+@[\w.-]+/u)?.[0] ?? "";
+        return email ? [{name: value.split("<", 1)[0].trim(), email}] : [];
+      }
+    }
+  };
+  const result = await extractManagedContactCandidates({
+    author: "Employee <employee@google.com>",
+    recipients: ["Customer <customer@customer.com>"],
+    ccList: ["Me <ubhi@google.com>", "Subdomain <news@em.google.com>"],
+    bccList: []
+  }, {
+    domains: ["google.com", "customer.com"],
+    addresses: []
+  }, ["google.com"], ["ubhi@google.com"], api);
+
+  assert.deepEqual(result, {
+    customer: [{name: "Customer", email: "customer@customer.com"}],
+    internal: [{name: "Employee", email: "employee@google.com"}]
+  });
+  assert.deepEqual(calls, [
+    "Employee <employee@google.com>",
+    "Customer <customer@customer.com>",
+    "Me <ubhi@google.com>",
+    "Subdomain <news@em.google.com>"
   ]);
 });
 

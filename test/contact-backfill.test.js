@@ -45,6 +45,15 @@ function config(customers = [customer()], accountOverrides = {}) {
   };
 }
 
+const googleAccount = {
+  ...account,
+  name: "Google Work",
+  identities: [
+    {email: "ubhi@google.com"},
+    {email: "ubhi.alias@google.com"}
+  ]
+};
+
 function message(id, overrides = {}) {
   return {
     id,
@@ -66,10 +75,15 @@ function parseMailboxes(value) {
   return entries;
 }
 
-function scanApi({folders = {}, pages = {}, onQuery = () => {}} = {}) {
+function scanApi({
+  folders = {},
+  pages = {},
+  onQuery = () => {},
+  mailAccount = account
+} = {}) {
   const customerRoot = {
     id: "customers",
-    accountId: "work",
+    accountId: mailAccount.id,
     name: "Customers",
     specialUse: []
   };
@@ -77,7 +91,7 @@ function scanApi({folders = {}, pages = {}, onQuery = () => {}} = {}) {
   return {
     folders: {
       getSubFolders: async folderId => {
-        if (folderId === account.rootFolder.id) return [customerRoot];
+        if (folderId === mailAccount.rootFolder.id) return [customerRoot];
         if (folderId === customerRoot.id) return children;
         return [];
       },
@@ -103,8 +117,8 @@ function scanApi({folders = {}, pages = {}, onQuery = () => {}} = {}) {
   };
 }
 
-function normalFolder(id, name) {
-  return {id, accountId: "work", name, specialUse: []};
+function normalFolder(id, name, mailAccount = account) {
+  return {id, accountId: mailAccount.id, name, specialUse: []};
 }
 
 function addressBook(id, name, overrides = {}) {
@@ -225,6 +239,187 @@ test("backfill scans only applicable configured folder trees and filters exact h
     {name: "Alice", email: "alice@acme.example"},
     {name: "Exact shared provider", email: "customer.contact@gmail.com"}
   ]);
+});
+
+test("backfill collects exact internal-domain contacts account-wide and keeps them out of customer groups", async () => {
+  const acmeFolder = normalFolder("acme-folder", "Acme", googleAccount);
+  const betaFolder = normalFolder("beta-folder", "Beta", googleAccount);
+  const rules = [
+    customer({addresses: ["special@google.com"]}),
+    customer({
+      id: "beta",
+      name: "Beta",
+      folderName: "Beta",
+      domains: ["beta.example"]
+    })
+  ];
+  const api = scanApi({
+    mailAccount: googleAccount,
+    folders: {acme: acmeFolder, beta: betaFolder},
+    pages: {
+      [acmeFolder.id]: {
+        first: {
+          id: null,
+          messages: [message(1, {
+            author: "Alice <alice@acme.example>",
+            recipients: [
+              "Employee <employee@google.com>",
+              "Own identity <ubhi@google.com>",
+              "Own alias <ubhi.alias@google.com>",
+              "Internal wins <special@google.com>"
+            ],
+            ccList: [
+              "Subdomain <person@dept.google.com>",
+              "Lookalike <person@google.com.evil>"
+            ]
+          })]
+        }
+      },
+      [betaFolder.id]: {
+        first: {
+          id: null,
+          messages: [message(2, {
+            author: "Bob <bob@beta.example>",
+            recipients: ["Employee better name <EMPLOYEE@GOOGLE.COM>"]
+          })]
+        }
+      }
+    }
+  });
+
+  const result = await scanExistingCustomerContacts({
+    account: googleAccount,
+    config: config(rules, {internalContactDomains: ["GOOGLE.COM"]}),
+    api
+  });
+
+  assert.equal(result.status, "complete");
+  assert.deepEqual(result.groups.map(group => group.kind), [
+    "customer",
+    "customer",
+    "internal"
+  ]);
+  assert.deepEqual(result.groups[0].candidates, [
+    {name: "Alice", email: "alice@acme.example"}
+  ]);
+  assert.deepEqual(result.groups[1].candidates, [
+    {name: "Bob", email: "bob@beta.example"}
+  ]);
+  assert.deepEqual(result.groups[2], {
+    kind: "internal",
+    organization: "google.com",
+    internalDomain: "google.com",
+    contactsFound: 2,
+    candidates: [
+      {name: "Employee", email: "employee@google.com"},
+      {name: "Internal wins", email: "special@google.com"}
+    ]
+  });
+  const allEmails = result.groups.flatMap(group =>
+    group.candidates.map(candidate => candidate.email)
+  );
+  assert.equal(allEmails.filter(email => email === "employee@google.com").length, 1);
+  assert.equal(allEmails.includes("ubhi@google.com"), false);
+  assert.equal(allEmails.includes("ubhi.alias@google.com"), false);
+  assert.equal(allEmails.includes("person@dept.google.com"), false);
+  assert.equal(allEmails.includes("person@google.com.evil"), false);
+});
+
+test("backfill ignores a saved internal domain no longer owned by an account identity", async () => {
+  const changedAccount = {
+    ...googleAccount,
+    identities: [{email: "ubhi@example.net"}]
+  };
+  const acmeFolder = normalFolder("acme-folder", "Acme", changedAccount);
+  const api = scanApi({
+    mailAccount: changedAccount,
+    folders: {acme: acmeFolder},
+    pages: {
+      [acmeFolder.id]: {
+        first: {
+          id: null,
+          messages: [message(1, {
+            author: "Alice <alice@acme.example>",
+            recipients: ["Former coworker <employee@google.com>"]
+          })]
+        }
+      }
+    }
+  });
+
+  const result = await scanExistingCustomerContacts({
+    account: changedAccount,
+    config: config([customer()], {internalContactDomains: ["google.com"]}),
+    api
+  });
+
+  assert.deepEqual(result.groups.map(group => group.kind), ["customer"]);
+  assert.deepEqual(result.groups[0].candidates, [
+    {name: "Alice", email: "alice@acme.example"}
+  ]);
+});
+
+test("an incomplete folder contributes neither customer nor internal contacts", async () => {
+  const acmeFolder = normalFolder("acme-folder", "Acme", googleAccount);
+  const betaFolder = normalFolder("beta-folder", "Beta", googleAccount);
+  const api = scanApi({
+    mailAccount: googleAccount,
+    folders: {acme: acmeFolder, beta: betaFolder},
+    pages: {
+      [acmeFolder.id]: {
+        first: {
+          id: "broken-page",
+          messages: [message(1, {
+            author: "Failed customer <failed@acme.example>",
+            recipients: ["Failed employee <failed@google.com>"]
+          })]
+        }
+      },
+      [betaFolder.id]: {
+        first: {
+          id: null,
+          messages: [message(2, {
+            author: "Bob <bob@beta.example>",
+            recipients: ["Successful employee <success@google.com>"]
+          })]
+        }
+      }
+    }
+  });
+  api.messages.continueList = async pageId => {
+    if (pageId === "broken-page") throw new Error("simulated interrupted pagination");
+    return null;
+  };
+  const rules = [
+    customer(),
+    customer({
+      id: "beta",
+      name: "Beta",
+      folderName: "Beta",
+      domains: ["beta.example"]
+    })
+  ];
+
+  const result = await scanExistingCustomerContacts({
+    account: googleAccount,
+    config: config(rules, {internalContactDomains: ["google.com"]}),
+    api
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.skippedFolders[0].code, "folder-scan-failed");
+  assert.deepEqual(result.groups.map(group => group.kind), ["customer", "internal"]);
+  assert.deepEqual(result.groups[0].candidates, [
+    {name: "Bob", email: "bob@beta.example"}
+  ]);
+  assert.deepEqual(result.groups[1].candidates, [
+    {name: "Successful employee", email: "success@google.com"}
+  ]);
+  const allEmails = result.groups.flatMap(group =>
+    group.candidates.map(candidate => candidate.email)
+  );
+  assert.equal(allEmails.includes("failed@acme.example"), false);
+  assert.equal(allEmails.includes("failed@google.com"), false);
 });
 
 test("a missing customer folder is reported and skipped without being created", async () => {
@@ -494,9 +689,10 @@ test("rerunning an existing-mail import is idempotent", async () => {
     account,
     storedBook: {addressBookId: "managed", addressBookName: expectedName},
     groups: [{
-      customerId: "acme",
-      customerName: "Acme",
-      candidates: [{name: "Alice", email: "alice@acme.example"}]
+      kind: "internal",
+      organization: "google.com",
+      internalDomain: "google.com",
+      candidates: [{name: "Colleague", email: "colleague@google.com"}]
     }],
     api
   };
@@ -508,4 +704,12 @@ test("rerunning an existing-mail import is idempotent", async () => {
   assert.equal(second.created, 0);
   assert.equal(second.existing, 1);
   assert.equal(creates, 1);
+  assert.match(storedContacts[0].vCard, /ORG:google\.com\r\n/u);
+  assert.deepEqual(first.results[0], {
+    email: "colleague@google.com",
+    customerId: "",
+    customerName: "",
+    status: "created",
+    contactId: "created-1"
+  });
 });

@@ -28,7 +28,67 @@ test("normalization fills account defaults and sanitizes matchers", () => {
   assert.equal(normalized.accounts.work.archiveFolderName, "Organizer Archive");
   assert.equal(normalized.accounts.work.archiveReady, false);
   assert.equal(normalized.accounts.work.enabled, false);
+  assert.deepEqual(normalized.accounts.work.internalContactDomains, []);
   assert.deepEqual(normalized.customers[0].domains, ["acme.com"]);
+});
+
+test("internal contact domains normalize without being enabled by default", () => {
+  const normalized = normalizeConfig({
+    accounts: {
+      work: {
+        internalContactDomains: [" GOOGLE.COM ", "google.com", "Sub.Google.com"]
+      }
+    }
+  }, [{id: "work", name: "Work", identities: [{email: "ubhi@google.com"}]}]);
+
+  assert.deepEqual(normalized.accounts.work.internalContactDomains, [
+    "google.com",
+    "sub.google.com"
+  ]);
+});
+
+test("validation accepts only internal domains represented by current account identities", () => {
+  const identityAccounts = [{
+    id: "work",
+    name: "Work",
+    identities: [{email: "ubhi@google.com"}]
+  }];
+  const valid = normalizeConfig({
+    accounts: {work: {internalContactDomains: ["google.com"]}}
+  }, identityAccounts);
+  assert.deepEqual(validateConfig(valid, identityAccounts), []);
+
+  const unrelated = normalizeConfig({
+    accounts: {work: {internalContactDomains: ["example.com"]}}
+  }, identityAccounts);
+  assert.ok(validateConfig(unrelated, identityAccounts).some(error =>
+    error.includes("example.com does not belong to a current account identity")
+  ));
+
+  const parentInsteadOfExactIdentityDomain = normalizeConfig({
+    accounts: {work: {internalContactDomains: ["google.com"]}}
+  }, [{id: "work", name: "Work", identities: [{email: "ubhi@corp.google.com"}]}]);
+  assert.ok(validateConfig(
+    parentInsteadOfExactIdentityDomain,
+    [{id: "work", name: "Work", identities: [{email: "ubhi@corp.google.com"}]}]
+  ).some(error => error.includes("does not belong to a current account identity")));
+});
+
+test("validation rejects public suffixes and approvals without a current identity", () => {
+  const noIdentityData = [{id: "work", name: "Work"}];
+  const unverified = normalizeConfig({
+    accounts: {work: {internalContactDomains: ["google.com"]}}
+  }, noIdentityData);
+  assert.ok(validateConfig(unverified, noIdentityData).some(error =>
+    error.includes("google.com does not belong to a current account identity")
+  ));
+
+  const unsafe = normalizeConfig({
+    accounts: {work: {internalContactDomains: ["co.uk"]}}
+  }, noIdentityData);
+  assert.ok(validateConfig(unsafe, noIdentityData).some(error =>
+    error.includes("cannot be a public suffix")
+  ));
 });
 
 test("validation catches a global matcher overlapping an account-specific matcher", () => {

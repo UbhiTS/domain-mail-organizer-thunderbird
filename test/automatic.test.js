@@ -492,7 +492,7 @@ test("a contact-capture failure never retries or reverses a successful move", as
   assert.equal(lastRuns[0].completed, 1);
   assert.equal(lastRuns[0].failed, 0);
   assert.equal(lastRuns[0].contactsFailed, 1);
-  assert.match(lastRuns[0].error, /Customer contact capture failed: address book unavailable/u);
+  assert.match(lastRuns[0].error, /Contact capture failed: address book unavailable/u);
 });
 
 test("automatic filing refuses to create an unapproved customer root", async () => {

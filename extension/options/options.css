@@ -58,6 +58,11 @@ textarea { resize: vertical; }
 .folder-approval.ready strong { color: light-dark(var(--green), #81c995); }
 .import-customer-folders { justify-self: start; }
 .automation-row { padding-top: 12px; border-top: 1px solid var(--border); }
+.internal-contacts-row { display: grid; gap: 7px; }
+.internal-contacts-row > small { line-height: 1.35; }
+.internal-domain-options { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.internal-domain-option { display: flex; align-items: center; gap: 7px; }
+.internal-domain-option input { margin: 0; }
 .customer-list { display: grid; gap: 14px; margin-top: 18px; }
 .customer-card { overflow: hidden; scroll-margin-top: 112px; }
 .customer-summary { display: flex; align-items: flex-start; gap: 10px; padding: 15px 16px; list-style: none; cursor: pointer; user-select: none; }
