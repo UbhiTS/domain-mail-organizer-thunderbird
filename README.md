@@ -161,6 +161,8 @@ artifacts. A `v*` tag whose version matches `package.json` and `manifest.json`
 also publishes those files to a GitHub Release.
 
 See [`docs/manual-test-plan.md`](docs/manual-test-plan.md) for the end-to-end Thunderbird checks.
+For ATN listing and reviewer fields, use the paste-ready
+[`docs/atn-submission.md`](docs/atn-submission.md) guide.
 
 ## Known limitations
 
