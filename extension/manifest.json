@@ -1,13 +1,21 @@
 {
   "manifest_version": 3,
   "name": "Domain Mail Organizer",
-  "description": "Organize customer email into account-local folders using domains, addresses, and keywords.",
-  "version": "0.1.8",
+  "description": "Organize customer email into account-local folders and capture customer contacts automatically.",
+  "version": "0.1.9",
   "author": "Tarun Ubhi (UbhiTS)",
   "browser_specific_settings": {
     "gecko": {
       "id": "ubhits.domain-mail-organizer@addons.thunderbird.net",
-      "strict_min_version": "140.0"
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   },
   "icons": {
@@ -33,6 +41,7 @@
   "permissions": [
     "accountsRead",
     "accountsFolders",
+    "addressBooks",
     "messagesRead",
     "messagesMove",
     "storage",

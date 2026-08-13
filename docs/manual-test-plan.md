@@ -6,8 +6,8 @@ Run these checks on Thunderbird 140 ESR or newer with a disposable profile and t
 
 - Load `extension/manifest.json` as a temporary add-on.
 - Confirm the background console has no startup errors.
-- Confirm the add-on requests account/folder read, folder creation, message read/move, storage, menu, and alarm access only.
-- Confirm installation creates no folders and moves no messages.
+- Confirm the add-on requests account/folder read, folder creation, address-book read/write, message read/move, storage, menu, and alarm access only.
+- Confirm installation creates no folders or address books, adds no contacts, and moves no messages.
 - Confirm the toolbar button opens the popup and Settings opens in a tab.
 
 ## 2. Settings validation
@@ -24,8 +24,10 @@ Run these checks on Thunderbird 140 ESR or newer with a disposable profile and t
 ## 3. Folder setup
 
 - Run **Save & set up folders**.
-- Confirm the configured customer root, dedicated Organizer Archive, and one direct child per active customer are created in each enabled account.
+- Confirm the configured customer root, dedicated Organizer Archive, one direct child per active customer, and one uniquely named `Customer Contacts — …` local address book are created for each enabled account.
 - Run setup a second time and confirm no duplicate folders are created.
+- Confirm the second setup also reuses the extension's managed address-book ID and creates no duplicate address book.
+- Before first setup, create an unrelated address book with the exact proposed `Customer Contacts — …` name. Confirm setup fails safely instead of adopting, clearing, or overwriting it. Rename/delete the test collision, rerun setup, and confirm the managed book is created.
 - Before first setup, create an ordinary folder using the proposed Organizer Archive name; confirm setup refuses to adopt it without one-time approval. Approve the exact name and confirm setup adopts it without creating a duplicate. Confirm its existing contents are unchanged, then verify recovery treats them as organizer-archive input.
 - Repeat with the proposed customer root name. Confirm setup refuses the unapproved collision, then approve the exact name and confirm it is adopted without creating a duplicate.
 - Put direct child folders named `acme.com`, `Rail.Hitachi.com`, and `Acme Projects` below that existing root. Select **Import existing customer folders...** and confirm only direct normal writable children are offered; nested, special-use, virtual, and read-only folders are excluded.
@@ -103,7 +105,20 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Add a Thunderbird filter that moves the same message after junk classification; confirm no duplicates are created. Late filters and the extension can race, so do not configure overlapping automatic rules in production.
 - Force or simulate a copy event and a move with no confirmation; confirm the Inbox message is held for manual review and is not automatically attempted again.
 
-## 9. Scale, restart, and packaging
+## 9. Automatic customer contacts
+
+- Complete **Save & set up folders**, enable automatic filing, and receive a message that automatically moves to a customer folder. Confirm customer-owned addresses from its From, To, Cc, and Bcc headers are added to that account's managed `Customer Contacts — …` book only after the move is accepted.
+- Put several customer-owned addresses in one message and confirm each unique normalized address is added once with its available display name.
+- Include the enabled account's own primary address and aliases/identities in the headers; confirm none of those addresses are added.
+- With only `shutterfly.com` configured, include both `person@shutterfly.com` and `person@em.shutterfly.com`; confirm only the exact configured-domain address is added. Then configure the subdomain for a separate customer and confirm it is captured only for that customer's automatic move.
+- Configure one exact shared-provider address, such as `customer.contact@gmail.com`, alongside an unrelated Gmail address; confirm only the configured exact address is added.
+- Pre-create the same normalized email address in the managed book, then in a different Thunderbird address book. In both cases, confirm a later automatic move creates no duplicate anywhere.
+- Put a customer-looking email address only in the subject or body and confirm it is never harvested as a contact, even when body matching is enabled for previews.
+- Preview or Apply a reviewed move, manually move a message, and copy a message into a customer folder with another tool. Confirm none of those actions adds a contact.
+- Delete the managed address book, then receive matching mail. Confirm automatic filing and contact capture pause together, the message stays in Inbox, and setup is requested. Run setup successfully, re-enable automation, and confirm later matched mail moves and captures contacts again.
+- Disable automatic filing and confirm existing contacts remain. In a disposable profile, uninstall the extension and confirm its address book and contacts remain ordinary user-owned Thunderbird data.
+
+## 10. Scale, restart, and packaging
 
 - Set the preview limit to 25 and scan a folder with more than 25 messages; confirm the truncation banner appears.
 - Scan more than one Thunderbird message-list page and confirm all pages up to the limit are processed.

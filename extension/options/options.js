@@ -322,17 +322,25 @@ function renderAccounts() {
       () => discoverCustomerFolders(card)
     );
     const autoFile = card.querySelector(".auto-file");
-    autoFile.checked = value.autoFileIncoming && value.customerRootReady;
+    const contactsReady = Boolean(
+      bootstrap.managedContactBooks?.[account.id]?.addressBookId &&
+      !bootstrap.managedContactBookErrors?.[account.id]
+    );
+    autoFile.checked = value.autoFileIncoming && value.customerRootReady && contactsReady;
     const autoHelp = card.querySelector(".auto-file-help");
     const updateRootState = () => {
-      const ready = value.customerRootReady &&
+      const rootReady = value.customerRootReady &&
         matchesSavedFolderName(rootFolder.value, value.rootFolderName);
-      renderFolderApproval(card, "root", ready);
-      autoFile.disabled = !ready;
-      if (!ready) autoFile.checked = false;
-      autoHelp.textContent = ready
-        ? "Sender/recipient rules only. A successful manual preview is recommended first."
-        : "Run Save & set up folders before automatic filing can be enabled.";
+      const automationReady = rootReady && contactsReady;
+      renderFolderApproval(card, "root", rootReady);
+      autoFile.disabled = !automationReady;
+      if (!automationReady) autoFile.checked = false;
+      autoHelp.textContent = automationReady
+        ? "Sender/recipient rules only. After each matched move, customer email contacts are added to the address book. A successful manual preview is recommended first."
+        : rootReady
+          ? bootstrap.managedContactBookErrors?.[account.id] ||
+            "Run Save & set up folders to create the managed customer address book."
+          : "Run Save & set up folders before automatic filing and contact capture can be enabled.";
     };
     const updateArchiveState = () => {
       const ready = value.archiveReady &&
@@ -551,12 +559,14 @@ elements.setupFolders.addEventListener("click", async () => {
   try {
     const result = await send("setupFolders", {folderApprovals});
     config = result.config;
+    bootstrap.managedContactBooks = result.managedContactBooks;
     renderAccounts();
     const details = result.result.errors.length
       ? `\n${result.result.errors.join("\n")}`
       : "";
+    const contactBookCount = result.result.contactBooks?.length ?? 0;
     showStatus(
-      `${result.result.folders.length} organizer folder destination${result.result.folders.length === 1 ? "" : "s"} ready.${details}`,
+      `${result.result.folders.length} organizer folder destination${result.result.folders.length === 1 ? "" : "s"} and ${contactBookCount} managed contact book${contactBookCount === 1 ? "" : "s"} ready.${details}`,
       result.result.errors.length > 0
     );
   } catch (error) {

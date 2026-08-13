@@ -36,6 +36,7 @@ export function createAutomaticFiler({
   recordArrivalHints = async () => {},
   markKnown = async () => {},
   consumeArrivalHint = async () => {},
+  captureContacts = async () => ({attempted: 0, created: 0, existing: 0, failed: 0}),
   buildPlan = buildOrganizePlan,
   apply = applyPlan
 }) {
@@ -219,7 +220,43 @@ export function createAutomaticFiler({
         requireDefiniteMove: true,
         confirmMove: journaledConfirmMove
       });
-      const error = result.failed ? describeFailures(result.results) : undefined;
+      let contacts = {attempted: 0, created: 0, existing: 0, failed: 0};
+      let contactError;
+      if (result.completed) {
+        const itemById = new Map(plan.items.map(item => [item.id, item]));
+        const messageById = new Map(
+          stableList.messages.map(message => [message.id, message])
+        );
+        const completed = (result.results ?? [])
+          .filter(itemResult => itemResult.status === "completed")
+          .map(itemResult => {
+            const item = itemById.get(itemResult.itemId);
+            const message = item ? messageById.get(item.messageId) : null;
+            return item && message ? {item, message, result: itemResult} : null;
+          })
+          .filter(Boolean);
+        try {
+          if (completed.length) {
+            contacts = {
+              ...contacts,
+              ...await captureContacts({
+                accountId: plan.accountId,
+                config,
+                completed
+              })
+            };
+          }
+        } catch (error) {
+          contacts.failed = completed.length;
+          contactError = `Customer contact capture failed: ${error.message}`;
+        }
+      }
+      if (!contactError && contacts.failed) {
+        contactError = contacts.error ??
+          `${contacts.failed} customer contact${contacts.failed === 1 ? "" : "s"} could not be added`;
+      }
+      const moveError = result.failed ? describeFailures(result.results) : undefined;
+      const error = [moveError, contactError].filter(Boolean).join("; ") || undefined;
       const lastRun = {
         kind: "automatic",
         title: "Automatic Inbox filing",
@@ -228,12 +265,17 @@ export function createAutomaticFiler({
         attempted: result.attempted,
         completed: result.completed,
         failed: result.failed,
+        contactsAttempted: contacts.attempted,
+        contactsCreated: contacts.created,
+        contactsExisting: contacts.existing,
+        contactsFailed: contacts.failed,
         ...(error ? {error} : {})
       };
       await saveLastRun(lastRun);
       return {
         status: result.failed ? (result.completed ? "partial" : "failed") : "complete",
         plan,
+        contacts,
         ...result
       };
     });

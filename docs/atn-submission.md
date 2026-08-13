@@ -1,33 +1,40 @@
 # Thunderbird Add-ons submission notes
 
-Use this checklist when submitting version 0.1.8 to addons.thunderbird.net
+Use this checklist when submitting version 0.1.9 to addons.thunderbird.net
 (ATN).
+
+Before pasting the reviewer links below, manually create/push the `v0.1.9` tag
+or publish the corresponding GitHub Release so the source snapshot exists.
 
 ## Validation screen
 
 - A result that says **validated with no errors** can continue.
 - Select **Thunderbird** only. Do not select SeaMonkey.
 - The generic validator may warn about these Thunderbird-only permissions:
-  `accountsRead`, `accountsFolders`, `messagesRead`, and `messagesMove`. They are
-  required by the extension and must not be removed.
+  `accountsRead`, `accountsFolders`, `addressBooks`, `messagesRead`, and
+  `messagesMove`. They are required by the extension and must not be removed.
 - Open **See full validation report** and confirm that no additional warning
   category is present.
+- The manifest declares `data_collection_permissions.required: ["none"]`
+  because the extension does not collect or transmit user data.
 
 ## Version notes
 
 Paste the following into **Version notes**:
 
-> Initial public release of Domain Mail Organizer for Thunderbird 140 ESR and
-> newer. Includes exact sender and recipient domain matching, exact-address
-> rules, optional subject/body keyword matching for reviewed manual actions,
-> read-only previews, explicit Apply confirmation, multi-account customer
-> folder trees, existing-folder adoption and rule import, a resumable
-> entire-Inbox workflow, dedicated organizer archive/recovery, starred-message
-> protection, address reports, and optional automatic Inbox filing with durable
-> reconciliation and move-safety journaling. Domain rules are exact:
-> shutterfly.com does not include em.shutterfly.com unless that subdomain is
-> configured separately. The extension has no telemetry, advertising, remote
-> code, external service, or host/network permission.
+> Adds automatic customer-contact capture paired with automatic Inbox filing.
+> Folder setup creates one managed local address book per enabled mail account;
+> after an accepted automatic move, exact customer-owned From/To/Cc/Bcc
+> addresses are added there. Capture globally deduplicates exact email
+> addresses, excludes the account's own identities, never scans message bodies,
+> and never updates or deletes existing contacts. This version also preserves
+> exact domain behavior: shutterfly.com does not include em.shutterfly.com
+> unless that subdomain is configured separately. All processing remains local,
+> with no telemetry, advertising, remote code, external service, or host/network
+> permission.
+> Existing users upgrading from 0.1.8 must run Save & set up folders once to
+> create the managed contact book, then re-enable automatic filing. Automation
+> pauses safely until that explicit setup is complete.
 
 ## Notes for reviewers
 
@@ -40,7 +47,7 @@ Paste the following into **Notes for Reviewers**:
 >
 > Source repository and tag:
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.8
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.9
 >
 > The packaged JavaScript, HTML, and CSS are readable source files. There is no
 > minification, transpilation, bundling, obfuscation, eval, remote code, or
@@ -51,7 +58,7 @@ Paste the following into **Notes for Reviewers**:
 > 1. npm ci --ignore-scripts
 > 2. npm run check
 > 3. npm run build
-> Output: artifacts/domain-mail-organizer-0.1.8.xpi and .zip.
+> Output: artifacts/domain-mail-organizer-0.1.9.xpi and .zip.
 >
 > Third-party library: psl 1.15.0, vendored unmodified as
 > extension/vendor/psl.mjs. Source:
@@ -63,6 +70,9 @@ Paste the following into **Notes for Reviewers**:
 > - accountsRead: enumerate the user's configured Thunderbird accounts and
 >   folders.
 > - accountsFolders: create only explicitly configured organizer folders.
+> - addressBooks: create one managed local customer-contact book per enabled
+>   account, check all address books for exact-email duplicates, and add exact
+>   customer-owned header addresses following accepted automatic moves.
 > - messagesRead: read message headers and optional locally fetched body text
 >   for matching and previews.
 > - messagesMove: perform reviewed Apply actions and enabled automatic filing.
@@ -75,17 +85,26 @@ Paste the following into **Notes for Reviewers**:
 > 1. Install in Thunderbird 140+ with a disposable mail account or test profile.
 > 2. Open the toolbar popup, then Settings & customer rules.
 > 3. Enable a test account, add a customer with example.com, and choose Save &
->    set up folders.
+>    set up folders. Confirm a uniquely named local `Customer Contacts — …` address book
+>    is also created; an unrelated exact-name collision is refused rather than
+>    adopted or overwritten.
 > 4. Preview Inbox or selected test messages. Preview itself creates/moves
 >    nothing; select Apply to perform proposed moves.
 > 5. Verify person@example.com matches and person@mail.example.com remains
 >    unmatched unless mail.example.com is explicitly configured.
 > 6. Automatic filing remains unavailable until the account-local customer root
 >    is explicitly set up.
+> 7. Enable automatic filing and receive a new person@example.com message.
+>    After its accepted move, confirm the exact customer-owned From/To/Cc/Bcc
+>    address is added once. Own identities, unconfigured subdomains, subject/body
+>    addresses, and addresses already present in any address book are not added.
+>    Previewed, manually applied, or externally moved messages do not add contacts.
 >
 > All processing is local. The extension makes no host/network requests and
-> transmits no mailbox data or telemetry. Privacy statement:
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.8/PRIVACY.md
+> transmits no mailbox data or telemetry. It never updates, merges, or deletes
+> existing contacts. Managed books and contacts remain user-owned after the
+> feature is disabled or the extension is uninstalled. Privacy statement:
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.9/PRIVACY.md
 
 ## Source-code upload field
 
@@ -93,7 +112,7 @@ The submitted XPI contains readable, unminified source and does not transform
 the runtime code, so a separate source upload is generally unnecessary. If ATN
 requests one, use the repository tag archive—not the installable release ZIP:
 
-https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.8.zip
+https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.9.zip
 
 The archive contains `package.json`, `package-lock.json`, the build script, and
 all extension sources required to reproduce the XPI.

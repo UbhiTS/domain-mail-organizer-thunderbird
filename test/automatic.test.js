@@ -216,6 +216,7 @@ function automaticFiler({
   config,
   buildPlan,
   apply,
+  captureContacts,
   confirmMove,
   loadSuppressions,
   mutateSuppressions,
@@ -240,6 +241,7 @@ function automaticFiler({
   if (consumeArrivalHint) dependencies.consumeArrivalHint = consumeArrivalHint;
   if (buildPlan) dependencies.buildPlan = buildPlan;
   if (apply) dependencies.apply = apply;
+  if (captureContacts) dependencies.captureContacts = captureContacts;
   if (confirmMove) dependencies.confirmMove = confirmMove;
   return {
     filer: createAutomaticFiler(dependencies),
@@ -258,6 +260,28 @@ function completedResult(plan) {
     failed: 0,
     customerRootCreated: false,
     results
+  };
+}
+
+function movePlan(messages, inboxId = "inbox") {
+  return {
+    id: "automatic-contact-plan",
+    kind: "organize",
+    accountId: "work",
+    accountName: "Work",
+    summary: {ambiguous: 0, skipped: 0},
+    items: messages.map(message => ({
+      id: `item-${message.id}`,
+      action: "move",
+      messageId: message.id,
+      headerMessageId: message.headerMessageId,
+      sourceFolderId: inboxId,
+      destinationFolderId: "acme-folder",
+      customerId: "acme",
+      customerName: "Acme",
+      subject: message.subject,
+      author: message.author
+    }))
   };
 }
 
@@ -325,6 +349,150 @@ test("automatic filing creates one missing customer folder and confirms every mo
   assert.equal(lastRuns[0].completed, 2);
   assert.equal(Object.keys(suppressions).length, 2);
   assert.ok(Object.values(suppressions).every(attempt => attempt.state === "confirmed"));
+});
+
+test("contact capture runs once after apply with only successfully moved mail", async () => {
+  const box = mailbox({destinationExists: true, messageCount: 2});
+  const events = [];
+  const captured = [];
+  const plan = movePlan(box.messages, box.inbox.id);
+  const {filer, lastRuns} = automaticFiler({
+    api: box.api,
+    config: box.config,
+    buildPlan: async () => plan,
+    apply: async () => {
+      events.push("apply");
+      return {
+        attempted: 2,
+        completed: 1,
+        failed: 1,
+        customerRootCreated: false,
+        results: [
+          {
+            itemId: "item-1",
+            status: "completed",
+            destinationFolderId: "acme-folder"
+          },
+          {itemId: "item-2", status: "failed", error: "simulated move failure"}
+        ]
+      };
+    },
+    captureContacts: async context => {
+      events.push("capture");
+      captured.push(context);
+      return {attempted: 2, created: 1, existing: 1, failed: 0};
+    }
+  });
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.deepEqual(events, ["apply", "capture"]);
+  assert.equal(captured.length, 1);
+  assert.deepEqual(Object.keys(captured[0]).sort(), ["accountId", "completed", "config"]);
+  assert.equal(captured[0].accountId, "work");
+  assert.equal(captured[0].config, box.config);
+  assert.equal(captured[0].completed.length, 1);
+  assert.equal(captured[0].completed[0].message, box.messages[0]);
+  assert.equal(captured[0].completed[0].item, plan.items[0]);
+  assert.deepEqual(captured[0].completed[0].result, {
+    itemId: "item-1",
+    status: "completed",
+    destinationFolderId: "acme-folder"
+  });
+  assert.equal(result.status, "partial");
+  assert.deepEqual(result.results.map(item => item.itemId), ["item-1", "item-2"]);
+  assert.deepEqual(result.contacts, {
+    attempted: 2,
+    created: 1,
+    existing: 1,
+    failed: 0
+  });
+  assert.equal(lastRuns.length, 1);
+  assert.equal(lastRuns[0].contactsAttempted, 2);
+  assert.equal(lastRuns[0].contactsCreated, 1);
+  assert.equal(lastRuns[0].contactsExisting, 1);
+  assert.equal(lastRuns[0].contactsFailed, 0);
+});
+
+test("contact capture is skipped when no mail matches or every move fails", async () => {
+  const noMatchBox = mailbox({destinationExists: true, messageCount: 1});
+  noMatchBox.messages[0].author = "Newsletter <news@unrelated.example>";
+  let noMatchCaptureCalls = 0;
+  const noMatchFiler = automaticFiler({
+    api: noMatchBox.api,
+    config: noMatchBox.config,
+    captureContacts: async () => {
+      noMatchCaptureCalls += 1;
+      return {attempted: 0, created: 0, existing: 0, failed: 0};
+    }
+  }).filer;
+
+  const noMatchResult = await noMatchFiler.handleNewMail(noMatchBox.inbox, {
+    id: null,
+    messages: noMatchBox.messages
+  });
+
+  const failedBox = mailbox({destinationExists: true, messageCount: 1});
+  let failedCaptureCalls = 0;
+  const failedFiler = automaticFiler({
+    api: failedBox.api,
+    config: failedBox.config,
+    buildPlan: async () => movePlan(failedBox.messages, failedBox.inbox.id),
+    apply: async () => ({
+      attempted: 1,
+      completed: 0,
+      failed: 1,
+      customerRootCreated: false,
+      results: [{itemId: "item-1", status: "failed", error: "move rejected"}]
+    }),
+    captureContacts: async () => {
+      failedCaptureCalls += 1;
+      return {attempted: 0, created: 0, existing: 0, failed: 0};
+    }
+  }).filer;
+
+  const failedResult = await failedFiler.handleNewMail(failedBox.inbox, {
+    id: null,
+    messages: failedBox.messages
+  });
+
+  assert.equal(noMatchResult.status, "no-match");
+  assert.equal(noMatchCaptureCalls, 0);
+  assert.equal(failedResult.status, "failed");
+  assert.equal(failedCaptureCalls, 0);
+});
+
+test("a contact-capture failure never retries or reverses a successful move", async () => {
+  const box = mailbox({destinationExists: true, messageCount: 1});
+  let captureCalls = 0;
+  const {filer, lastRuns} = automaticFiler({
+    api: box.api,
+    config: box.config,
+    captureContacts: async () => {
+      captureCalls += 1;
+      throw new Error("address book unavailable");
+    }
+  });
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.equal(result.status, "complete");
+  assert.equal(result.completed, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(captureCalls, 1);
+  assert.equal(box.moves.length, 1);
+  assert.deepEqual(box.moves[0].messageIds, [1]);
+  assert.deepEqual(result.contacts, {
+    attempted: 0,
+    created: 0,
+    existing: 0,
+    failed: 1
+  });
+  assert.equal(lastRuns.length, 1);
+  assert.equal(lastRuns[0].completed, 1);
+  assert.equal(lastRuns[0].failed, 0);
+  assert.equal(lastRuns[0].contactsFailed, 1);
+  assert.match(lastRuns[0].error, /Customer contact capture failed: address book unavailable/u);
 });
 
 test("automatic filing refuses to create an unapproved customer root", async () => {

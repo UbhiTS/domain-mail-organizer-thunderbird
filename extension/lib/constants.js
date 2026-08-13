@@ -9,6 +9,7 @@ export const BULK_SESSION_KEY_PREFIX = "bulkSession:";
 export const CURRENT_BULK_SESSION_KEY = "currentBulkSessionId";
 export const AUTO_SUPPRESSIONS_KEY = "automaticSuppressions";
 export const AUTO_BASELINES_KEY = "automaticNewBaselines";
+export const CONTACT_BOOKS_KEY = "managedContactBooks";
 export const MAX_BODY_CHARACTERS = 500_000;
 
 export const DEFAULT_CONFIG = Object.freeze({

@@ -28,6 +28,7 @@ That is the original Outlook precedence, with one safety improvement: if a singl
 - Exact, boundary-safe domain matching alongside exact-address, subject, body, and keyword matching. A domain rule never includes its subdomains unless they are configured separately.
 - A frequency-sorted address report for the selected customer folder, copied as a semicolon-separated list.
 - Optional sender/recipient-only automatic filing for new Inbox mail after customer folders have been set up.
+- Automatic contact capture paired with automatic filing: after a matched move, customer-owned From/To/Cc/Bcc addresses are added to a dedicated local address book for that account, with exact global deduplication across all address books.
 - Startup and five-minute full-Inbox reconciliation against a compact durable activation baseline, recovering ordinary arrivals omitted by Thunderbird's new-mail event.
 - JSON settings import/export.
 - Explicit adoption of an existing account-local customer root or organizer archive folder.
@@ -74,13 +75,14 @@ The XPI is unsigned. It can be used for local development/testing where Thunderb
    - Domains: `acme.com, acmecloud.io`
    - Optional exact addresses for shared providers such as Gmail.
    - Optional project/customer keywords.
-7. Select **Save & set up folders**. Adoption consent is one-use and must exactly match the configured name.
+7. Select **Save & set up folders**. Adoption consent is one-use and must exactly match the configured name. Setup also creates one uniquely named managed local address book per enabled account, using its identity and Thunderbird account-ID suffix (for example, `Customer Contacts — you@example.com (account1)`). An existing address book with that exact name is not silently adopted or overwritten; resolve the collision and run setup again.
 8. Use the toolbar button to **Preview Inbox** for a normal date-window batch, or **Process entire Inbox** to scan all dates in resumable batches.
 9. Review each proposed destination and deselect anything you do not want to move.
 10. Select **Apply selected actions**.
-11. After folder setup, we recommend testing one preview and Apply before optionally enabling automatic Inbox filing in Settings.
+11. After folder setup, we recommend testing one preview and Apply before optionally enabling automatic Inbox filing in Settings. Automatic filing also enables automatic contact capture for those moves; there is no separate contact-mining mode.
 
-Installing or updating the extension does not create folders or move messages. Folder discovery/import is read-only and never inspects message contents.
+Installing or updating the extension does not create folders, create address books, add contacts, or move messages. Folder discovery/import is read-only and never inspects message contents.
+When upgrading from 0.1.8, automatic filing pauses until **Save & set up folders** creates the managed contact book and you explicitly re-enable automation.
 Folder setup will not silently adopt an existing customer root or organizer archive. It reuses one only when you provide one-time exact-name approval in that account card. Existing customer destinations beneath an approved root are reused by their exact configured names.
 
 ## Outlook-to-Thunderbird mapping
@@ -110,6 +112,10 @@ The dedicated organizer archive is intentional. Thunderbird maps Gmail's native 
 - Existing-root import examines direct normal writable child folders only. It never recurses, reads messages, changes folders, or enables a rule inferred from a broad public suffix or an exact-domain conflict.
 - Automatic filing requires an approved customer root from **Save & set up folders**, then safely creates a missing direct customer folder when its first matching message arrives.
 - Automatic filing uses sender/recipient domain and exact-address rules only; subject and body inference remain preview-only.
+- **Save & set up folders** creates one uniquely named managed local address book per enabled account. Setup fails safely if an unrelated address book already has that exact name; the extension never silently adopts, clears, or overwrites it.
+- After a matched automatic move is accepted, contact capture considers only From, To, Cc, and Bcc addresses that exactly match that customer's configured domain or exact-address rules. It excludes the account's own identities and never mines the subject or message body for contacts.
+- Contact email matching and deduplication are exact after normalization. Before adding a contact, the extension checks every readable address book; it never updates, merges, or deletes an existing contact.
+- Previews, reviewed Apply actions, manual Thunderbird moves, and mail already present in a customer folder do not add contacts. If the managed address book is missing, renamed, or no longer writable, automatic filing and contact capture pause together until setup is repaired.
 - Enabling automatic filing first snapshots the complete current Inbox, so existing mail is not silently treated as a new arrival. New-mail event hints are persisted before filing work waits in a queue.
 - Every automatic move is journaled to local storage before Thunderbird is asked to move it. A copied or failed outcome is held for manual review and is never blindly retried; an accepted move remains claimed until Inbox reconciliation proves it absent.
 - Cross-account automatic moves are prohibited.
@@ -125,6 +131,7 @@ The requested permissions are intentionally limited:
 
 - `accountsRead`: discover the user's accounts and folders.
 - `accountsFolders`: create explicitly configured customer folders.
+- `addressBooks`: create the account's managed local customer-contact book, check all address books for exact-email duplicates, and add contacts captured after accepted automatic moves.
 - `messagesRead`: inspect headers, subject, and optionally body text.
 - `messagesMove`: move matched messages between the account-local organizer folders.
 - `storage`: save local rules, previews, and the last run summary.
@@ -157,8 +164,7 @@ npm run build
 
 GitHub Actions runs syntax checks, all tests, lint, and packaging on every push
 and pull request. It uploads the XPI, ZIP, and SHA-256 checksums as workflow
-artifacts. A `v*` tag whose version matches `package.json` and `manifest.json`
-also publishes those files to a GitHub Release.
+artifacts. Publishing a GitHub Release remains a manual maintainer action.
 
 See [`docs/manual-test-plan.md`](docs/manual-test-plan.md) for the end-to-end Thunderbird checks.
 For ATN listing and reviewer fields, use the paste-ready
@@ -174,6 +180,8 @@ For ATN listing and reviewer fields, use the paste-ready
 - Gmail exposes IMAP folders as labels. This extension therefore uses a dedicated `Organizer Archive` label rather than Gmail `All Mail`; real Google Workspace label behavior still needs the manual test plan.
 - Automatic filing covers new Inbox messages only. Sent mail can be organized explicitly from the message-list context action; this release does not alter Thunderbird's normal send/FCC behavior.
 - Automatic filing intentionally uses only sender/recipient headers. Late Thunderbird filters can still race with the new-mail event, so avoid overlapping automatic rules for the same customers.
+- Automatic contact capture is coupled to automatic Inbox filing. It does not run for previews, reviewed/manual moves, or mail placed in customer folders by another tool. Contacts already added remain ordinary user-owned Thunderbird contacts after automatic filing is disabled or the extension is uninstalled.
+- Deleting or invalidating a managed customer-contacts address book pauses later automatic moves and contact captures for that account until setup is run successfully again. Mail already moved remains moved and is never retried solely because contact capture failed.
 - Thunderbird has an open defect in which an arrival event can occasionally be omitted. The extension therefore compares the full enabled Inbox with a compact durable multiset at startup and every five minutes, then processes at most 50 unseen candidates per pass. Event-observed mail remains eligible even with an old Date header. A scan-only old-dated discovery is left in Inbox and reported for review because Thunderbird 140 cannot distinguish delayed new mail from previously unsynchronized history.
 - Thunderbird may briefly increment the Inbox badge before an automatic move finishes, and folder-count notifications can be collapsed by Thunderbird. The extension never uses badge counts as proof of a move.
 - Automatic filing applies each move once and does not blindly retry. The move journal is written before the API call, and the move-event broker has no fixed wall-clock deadline that could misclassify a slow IMAP operation. Verify the automatic workflow with a disposable Google Workspace mailbox before relying on it for production mail.

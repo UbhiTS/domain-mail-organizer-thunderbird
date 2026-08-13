@@ -7,11 +7,22 @@ import {
   LAST_RUN_KEY,
   AUTO_SUPPRESSIONS_KEY,
   AUTO_BASELINES_KEY,
+  CONTACT_BOOKS_KEY,
   PLAN_KEY_PREFIX,
   BULK_SESSION_KEY_PREFIX
 } from "./lib/constants.js";
-import {customerHasUnsafeDomain, normalizeConfig, validateConfig} from "./lib/config.js";
+import {
+  customerHasUnsafeDomain,
+  normalizeConfig,
+  validateConfig
+} from "./lib/config.js";
 import {createAutomaticFiler} from "./lib/automatic.js";
+import {
+  captureMovedMessageContacts,
+  setupManagedContactBook,
+  validateManagedContactBook
+} from "./lib/contact-book.js";
+import {normalizeManagedContactBooks} from "./lib/contact-state.js";
 import {messageFingerprint} from "./lib/fingerprint.js";
 import {proposeCustomersFromFolders} from "./lib/folder-import.js";
 import {
@@ -43,6 +54,7 @@ let suppressionQueue = Promise.resolve();
 let baselineQueue = Promise.resolve();
 let stateMigrationQueue = Promise.resolve();
 let bulkReviewQueue = Promise.resolve();
+let contactQueue = Promise.resolve();
 const AUTOMATIC_BASELINE_SCHEMA = 3;
 
 function incrementCount(counts, key, amount = 1) {
@@ -179,12 +191,30 @@ async function loadState() {
     CONFIG_KEY,
     LAST_RUN_KEY,
     AUTO_BASELINES_KEY,
-    AUTO_SUPPRESSIONS_KEY
+    AUTO_SUPPRESSIONS_KEY,
+    CONTACT_BOOKS_KEY
   ]);
   const config = normalizeConfig(stored[CONFIG_KEY], accounts);
+  const managedContactBooks = normalizeManagedContactBooks(stored[CONTACT_BOOKS_KEY]);
+  const managedContactBookErrors = {};
+  for (const account of accounts) {
+    if (!config.accounts?.[account.id]?.enabled) continue;
+    try {
+      await validateManagedContactBook(
+        account,
+        managedContactBooks[account.id],
+        messenger
+      );
+    } catch (error) {
+      managedContactBookErrors[account.id] = error.message;
+    }
+  }
+  let lastRun = stored[LAST_RUN_KEY] ?? null;
   let storedBaselines = stored[AUTO_BASELINES_KEY] ?? {};
   const unreadyAutomaticAccounts = Object.entries(config.accounts).filter(
-    ([, accountConfig]) => accountConfig.autoFileIncoming && !accountConfig.customerRootReady
+    ([accountId, accountConfig]) =>
+      accountConfig.autoFileIncoming &&
+      (!accountConfig.customerRootReady || managedContactBookErrors[accountId])
   );
   if (unreadyAutomaticAccounts.length) {
     for (const [accountId, accountConfig] of unreadyAutomaticAccounts) {
@@ -199,15 +229,16 @@ async function loadState() {
       [CONFIG_KEY]: config,
       [AUTO_BASELINES_KEY]: storedBaselines
     });
-    await saveLastRun({
+    lastRun = {
       kind: "safety",
       title: "Automatic filing paused",
       finishedAt: new Date().toISOString(),
       attempted: 0,
       completed: 0,
       failed: 0,
-      error: "Run Save & set up folders before enabling automatic filing"
-    });
+      error: `Run Save & set up folders before enabling automatic filing and contact capture for ${unreadyAutomaticAccounts.map(([accountId]) => accounts.find(account => account.id === accountId)?.name ?? accountId).join(", ")}`
+    };
+    await saveLastRun(lastRun);
   }
   const unsafeDomainRules = config.customers.filter(customer =>
     customer.enabled && customerHasUnsafeDomain(customer)
@@ -227,7 +258,7 @@ async function loadState() {
       [CONFIG_KEY]: config,
       [AUTO_BASELINES_KEY]: storedBaselines
     });
-    await saveLastRun({
+    lastRun = {
       kind: "safety",
       title: "Automatic filing paused",
       finishedAt: new Date().toISOString(),
@@ -235,7 +266,8 @@ async function loadState() {
       completed: 0,
       failed: 0,
       error: `Remove broad public-suffix rules from: ${unsafeDomainRules.map(customer => customer.name).join(", ")}`
-    });
+    };
+    await saveLastRun(lastRun);
   }
   const migrationAccounts = [];
   for (const [accountId, accountConfig] of Object.entries(config.accounts)) {
@@ -308,20 +340,37 @@ async function loadState() {
   return {
     accounts,
     config,
-    lastRun: stored[LAST_RUN_KEY] ?? null,
-    automaticReviews
+    lastRun,
+    automaticReviews,
+    managedContactBooks,
+    managedContactBookErrors
   };
 }
 
 async function automaticConfigForCurrentState() {
   const accounts = await listAccounts();
-  const stored = await messenger.storage.local.get(CONFIG_KEY);
+  const stored = await messenger.storage.local.get([CONFIG_KEY, CONTACT_BOOKS_KEY]);
   const config = normalizeConfig(stored[CONFIG_KEY], accounts);
+  const managedContactBooks = normalizeManagedContactBooks(stored[CONTACT_BOOKS_KEY]);
   const hasUnsafeRule = config.customers.some(customer =>
     customer.enabled && customerHasUnsafeDomain(customer)
   );
-  for (const accountConfig of Object.values(config.accounts)) {
-    if (!accountConfig.customerRootReady || hasUnsafeRule) {
+  for (const account of accounts) {
+    const accountConfig = config.accounts[account.id];
+    if (!accountConfig) continue;
+    let contactBookReady = true;
+    if (accountConfig.enabled && accountConfig.autoFileIncoming) {
+      try {
+        await validateManagedContactBook(
+          account,
+          managedContactBooks[account.id],
+          messenger
+        );
+      } catch {
+        contactBookReady = false;
+      }
+    }
+    if (!accountConfig.customerRootReady || hasUnsafeRule || !contactBookReady) {
       accountConfig.autoFileIncoming = false;
       accountConfig.autoFileSince = null;
     }
@@ -533,6 +582,29 @@ function enqueueBulkReview(operation) {
   return queued;
 }
 
+function enqueueContactMutation(operation) {
+  const queued = contactQueue.catch(() => {}).then(operation);
+  contactQueue = queued;
+  return queued;
+}
+
+async function captureAutomaticContacts({accountId, config, completed}) {
+  return enqueueContactMutation(async () => {
+    const account = await getAccount(accountId);
+    const stored = await messenger.storage.local.get(CONTACT_BOOKS_KEY);
+    const managedBook = normalizeManagedContactBooks(
+      stored[CONTACT_BOOKS_KEY]
+    )[accountId];
+    return captureMovedMessageContacts({
+      account,
+      storedBook: managedBook,
+      config,
+      completed,
+      api: messenger
+    });
+  });
+}
+
 async function openPlan(plan) {
   await messenger.tabs.create({
     active: true,
@@ -542,8 +614,9 @@ async function openPlan(plan) {
 
 async function saveConfigNow(rawConfig) {
   const accounts = await listAccounts();
-  const stored = await messenger.storage.local.get(CONFIG_KEY);
+  const stored = await messenger.storage.local.get([CONFIG_KEY, CONTACT_BOOKS_KEY]);
   const current = normalizeConfig(stored[CONFIG_KEY], accounts);
+  const managedContactBooks = normalizeManagedContactBooks(stored[CONTACT_BOOKS_KEY]);
   const normalized = normalizeConfig(rawConfig, accounts);
   const baselineUpdates = {};
   const initializingAccounts = [];
@@ -567,6 +640,29 @@ async function saveConfigNow(rawConfig) {
       throw new Error(
         "Automatic filing requires an approved customer root. Save the root name, run Save & set up folders, then enable automatic filing."
       );
+    }
+    if (
+      requestedAutomatic &&
+      accountConfig.autoFileIncoming &&
+      !managedContactBooks[accountId]?.addressBookId
+    ) {
+      throw new Error(
+        "Automatic filing and contact capture require a managed address book. Run Save & set up folders first."
+      );
+    }
+    if (requestedAutomatic && accountConfig.autoFileIncoming) {
+      const account = accounts.find(candidate => candidate.id === accountId);
+      try {
+        await validateManagedContactBook(
+          account,
+          managedContactBooks[accountId],
+          messenger
+        );
+      } catch (error) {
+        throw new Error(
+          `Automatic filing and contact capture are not ready for ${account?.name ?? accountId}: ${error.message} Run Save & set up folders first.`
+        );
+      }
     }
     const newlyEnabled = accountConfig.autoFileIncoming && !currentAccount?.autoFileIncoming;
     if (newlyEnabled) {
@@ -665,7 +761,9 @@ async function handleCommand(message) {
         accounts: state.accounts.map(publicAccount),
         config: state.config,
         lastRun: state.lastRun,
-        automaticReviews: state.automaticReviews
+        automaticReviews: state.automaticReviews,
+        managedContactBooks: state.managedContactBooks,
+        managedContactBookErrors: state.managedContactBookErrors
       };
     }
     case "saveConfig":
@@ -696,8 +794,45 @@ async function handleCommand(message) {
           messenger,
           {folderApprovals: message.folderApprovals ?? {}}
         );
-        await messenger.storage.local.set({[CONFIG_KEY]: state.config});
-        return {result, config: state.config};
+        const managedContactBooks = structuredClone(state.managedContactBooks ?? {});
+        const contactBooks = [];
+        for (const account of state.accounts) {
+          const accountConfig = state.config.accounts?.[account.id];
+          if (!accountConfig?.enabled || !accountConfig.customerRootReady) continue;
+          try {
+            const contactBook = await enqueueContactMutation(() =>
+              setupManagedContactBook(
+                account,
+                managedContactBooks[account.id],
+                messenger
+              )
+            );
+            managedContactBooks[account.id] = {
+              addressBookId: contactBook.addressBookId,
+              addressBookName: contactBook.addressBookName
+            };
+            // Persist ownership immediately after Thunderbird creates or
+            // validates the book. A later folder/config storage failure must
+            // not orphan a newly created same-name book as "unowned".
+            await messenger.storage.local.set({
+              [CONTACT_BOOKS_KEY]: managedContactBooks
+            });
+            contactBooks.push(contactBook);
+          } catch (error) {
+            accountConfig.autoFileIncoming = false;
+            accountConfig.autoFileSince = null;
+            await mutateAutomaticBaselines(baselines => {
+              delete baselines[account.id];
+            });
+            result.errors.push(`${account.name} / customer contacts: ${error.message}`);
+          }
+        }
+        await messenger.storage.local.set({
+          [CONFIG_KEY]: state.config,
+          [CONTACT_BOOKS_KEY]: managedContactBooks
+        });
+        result.contactBooks = contactBooks;
+        return {result, config: state.config, managedContactBooks};
       });
     }
     case "discoverExistingFolders": {
@@ -823,6 +958,7 @@ const automaticFiler = createAutomaticFiler({
   recordArrivalHints: recordAutomaticArrivalHints,
   markKnown: markAutomaticMessagesKnown,
   consumeArrivalHint: consumeAutomaticArrivalHint,
+  captureContacts: captureAutomaticContacts,
   persistConfigState: updatedConfig =>
     messenger.storage.local.set({[CONFIG_KEY]: updatedConfig})
 });

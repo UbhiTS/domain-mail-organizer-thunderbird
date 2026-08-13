@@ -43,8 +43,11 @@ function renderLastRun(lastRun) {
   const account = lastRun.accountName ? ` · ${lastRun.accountName}` : "";
   const counts = `${lastRun.completed}/${lastRun.attempted} completed`;
   const failures = lastRun.failed ? ` · ${lastRun.failed} failed` : "";
+  const contactCounts = Number.isFinite(lastRun.contactsAttempted)
+    ? ` · contacts: ${lastRun.contactsCreated ?? 0} added, ${lastRun.contactsExisting ?? 0} existing${lastRun.contactsFailed ? `, ${lastRun.contactsFailed} failed` : ""}`
+    : "";
   const error = lastRun.error ? ` · ${lastRun.error}` : "";
-  details.textContent = `${lastRun.title}${account} · ${counts}${failures}${error} · ${date}`;
+  details.textContent = `${lastRun.title}${account} · ${counts}${failures}${contactCounts}${error} · ${date}`;
   elements.lastRun.replaceChildren(title, details);
   elements.lastRun.classList.remove("hidden");
 }
