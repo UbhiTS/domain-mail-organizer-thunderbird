@@ -47,10 +47,12 @@ import {
 } from "./lib/plans.js";
 import {
   createBulkReviewSession,
+  migrateBulkReviewSession,
   mergeBulkBatch,
   publicBulkProgress,
   validateBulkReviewSession
 } from "./lib/bulk-review.js";
+import {storeBulkPlanAndSession} from "./lib/transient-storage.js";
 
 const accountQueues = new Map();
 let mutationQueue = Promise.resolve();
@@ -99,9 +101,15 @@ async function captureInboxBaseline(account, activatedAt = new Date().toISOStrin
 
 async function mutateAutomaticBaselines(mutator) {
   const queued = baselineQueue.catch(() => {}).then(async () => {
-    const stored = await messenger.storage.local.get(AUTO_BASELINES_KEY);
+    const stored = await messenger.storage.local.get([
+      AUTO_BASELINES_KEY,
+      CONFIG_KEY
+    ]);
     const baselines = structuredClone(stored[AUTO_BASELINES_KEY] ?? {});
-    const outcome = await mutator(baselines);
+    const outcome = await mutator(baselines, stored[CONFIG_KEY]);
+    if (outcome?.write === false) {
+      return outcome?.result;
+    }
     await messenger.storage.local.set({
       [AUTO_BASELINES_KEY]: baselines,
       ...(outcome?.storage ?? {})
@@ -112,17 +120,48 @@ async function mutateAutomaticBaselines(mutator) {
   return queued;
 }
 
+function configSnapshotToken(config) {
+  return JSON.stringify(config);
+}
+
+/**
+ * Commit a repair derived by loadState only if its configuration snapshot is
+ * still current. The same queue also owns saveConfig's config+baseline commit,
+ * so the comparison and write cannot be interleaved by a newer settings save.
+ */
+async function commitLoadStateRepair(expectedStoredConfig, expectedConfig, repair) {
+  const expectedToken = configSnapshotToken(expectedStoredConfig);
+  return mutateAutomaticBaselines((baselines, storedConfig) => {
+    if (configSnapshotToken(storedConfig) !== expectedToken) {
+      return {result: {committed: false}};
+    }
+    const nextConfig = structuredClone(expectedConfig);
+    const value = repair(nextConfig, baselines);
+    return {
+      storage: {[CONFIG_KEY]: nextConfig},
+      result: {
+        committed: true,
+        config: nextConfig,
+        baselines: structuredClone(baselines),
+        value
+      }
+    };
+  });
+}
+
 async function recordAutomaticArrivalHints(accountId, messages) {
-  const stored = await messenger.storage.local.get([CONFIG_KEY, AUTO_BASELINES_KEY]);
-  const record = stored[AUTO_BASELINES_KEY]?.[accountId];
-  if (
-    !stored[CONFIG_KEY]?.accounts?.[accountId]?.autoFileIncoming &&
-    !automaticActivationRecord(record)
-  ) {
-    return;
-  }
-  return mutateAutomaticBaselines(baselines => {
+  return mutateAutomaticBaselines((baselines, storedConfig) => {
     let record = baselines[accountId];
+    // Re-check eligibility inside the baseline queue. An event may be captured
+    // before a settings save disables automation, then wait behind that save.
+    // An initializing activation remains eligible so arrivals observed during
+    // its Inbox census are retained until the activation commit.
+    if (
+      !storedConfig?.accounts?.[accountId]?.autoFileIncoming &&
+      !automaticActivationRecord(record)
+    ) {
+      return {write: false};
+    }
     if (automaticActivationRecord(record)) {
       record.pendingHints ??= {};
       for (const message of messages) {
@@ -190,7 +229,7 @@ function publicAccount(account) {
   };
 }
 
-async function loadState() {
+async function loadState(conflictRetries = 0) {
   const accounts = await listAccounts();
   const stored = await messenger.storage.local.get([
     CONFIG_KEY,
@@ -199,7 +238,8 @@ async function loadState() {
     AUTO_SUPPRESSIONS_KEY,
     CONTACT_BOOKS_KEY
   ]);
-  const config = normalizeConfig(stored[CONFIG_KEY], accounts);
+  let config = normalizeConfig(stored[CONFIG_KEY], accounts);
+  let configStorageSnapshot = stored[CONFIG_KEY];
   const managedContactBooks = normalizeManagedContactBooks(stored[CONTACT_BOOKS_KEY]);
   const managedContactBookErrors = {};
   for (const account of accounts) {
@@ -222,18 +262,29 @@ async function loadState() {
       (!accountConfig.customerRootReady || managedContactBookErrors[accountId])
   );
   if (unreadyAutomaticAccounts.length) {
-    for (const [accountId, accountConfig] of unreadyAutomaticAccounts) {
-      accountConfig.autoFileIncoming = false;
-      accountConfig.autoFileSince = null;
-      delete storedBaselines[accountId];
+    const repair = await commitLoadStateRepair(
+      configStorageSnapshot,
+      config,
+      (nextConfig, baselines) => {
+        for (const [accountId] of unreadyAutomaticAccounts) {
+          nextConfig.accounts[accountId].autoFileIncoming = false;
+          nextConfig.accounts[accountId].autoFileSince = null;
+          delete baselines[accountId];
+        }
+        nextConfig.revision = nextConfig.revision >= Number.MAX_SAFE_INTEGER
+          ? 0
+          : nextConfig.revision + 1;
+      }
+    );
+    if (!repair.committed) {
+      if (conflictRetries >= 2) {
+        throw new Error("Settings kept changing while safety checks were running. Try again.");
+      }
+      return loadState(conflictRetries + 1);
     }
-    config.revision = config.revision >= Number.MAX_SAFE_INTEGER
-      ? 0
-      : config.revision + 1;
-    await messenger.storage.local.set({
-      [CONFIG_KEY]: config,
-      [AUTO_BASELINES_KEY]: storedBaselines
-    });
+    config = repair.config;
+    configStorageSnapshot = repair.config;
+    storedBaselines = repair.baselines;
     lastRun = {
       kind: "safety",
       title: "Automatic filing paused",
@@ -241,7 +292,7 @@ async function loadState() {
       attempted: 0,
       completed: 0,
       failed: 0,
-      error: `Run Save & set up folders before enabling automatic filing and contact capture for ${unreadyAutomaticAccounts.map(([accountId]) => accounts.find(account => account.id === accountId)?.name ?? accountId).join(", ")}`
+      error: `Choose Save & set up before enabling automatic filing and contact capture for ${unreadyAutomaticAccounts.map(([accountId]) => accounts.find(account => account.id === accountId)?.name ?? accountId).join(", ")}`
     };
     await saveLastRun(lastRun);
   }
@@ -249,20 +300,31 @@ async function loadState() {
     customer.enabled && customerHasUnsafeDomain(customer)
   );
   if (unsafeDomainRules.length) {
-    for (const accountConfig of Object.values(config.accounts)) {
-      accountConfig.autoFileIncoming = false;
-      accountConfig.autoFileSince = null;
+    const repair = await commitLoadStateRepair(
+      configStorageSnapshot,
+      config,
+      (nextConfig, baselines) => {
+        for (const accountConfig of Object.values(nextConfig.accounts)) {
+          accountConfig.autoFileIncoming = false;
+          accountConfig.autoFileSince = null;
+        }
+        nextConfig.revision = nextConfig.revision >= Number.MAX_SAFE_INTEGER
+          ? 0
+          : nextConfig.revision + 1;
+        for (const accountId of Object.keys(baselines)) {
+          delete baselines[accountId];
+        }
+      }
+    );
+    if (!repair.committed) {
+      if (conflictRetries >= 2) {
+        throw new Error("Settings kept changing while safety checks were running. Try again.");
+      }
+      return loadState(conflictRetries + 1);
     }
-    config.revision = config.revision >= Number.MAX_SAFE_INTEGER
-      ? 0
-      : config.revision + 1;
-    for (const accountId of Object.keys(storedBaselines)) {
-      delete storedBaselines[accountId];
-    }
-    await messenger.storage.local.set({
-      [CONFIG_KEY]: config,
-      [AUTO_BASELINES_KEY]: storedBaselines
-    });
+    config = repair.config;
+    configStorageSnapshot = repair.config;
+    storedBaselines = repair.baselines;
     lastRun = {
       kind: "safety",
       title: "Automatic filing paused",
@@ -286,47 +348,84 @@ async function loadState() {
   }
   if (migrationAccounts.length) {
     const migrate = stateMigrationQueue.catch(() => {}).then(async () => {
-      for (const {account, accountConfig} of migrationAccounts) {
+      let migrationConfig = config;
+      let migrationStorageSnapshot = configStorageSnapshot;
+      let migrationBaselines = storedBaselines;
+      for (const {account} of migrationAccounts) {
         const activatedAt = new Date().toISOString();
-        const claimed = await mutateAutomaticBaselines(baselines => {
-          if (validBaselineRecord(baselines[account.id])) {
-            return {result: false};
+        const claim = await commitLoadStateRepair(
+          migrationStorageSnapshot,
+          migrationConfig,
+          (nextConfig, baselines) => {
+            if (validBaselineRecord(baselines[account.id])) {
+              nextConfig.accounts[account.id].autoFileSince =
+                baselines[account.id].activatedAt ?? activatedAt;
+              return {claimed: false};
+            }
+            baselines[account.id] = {
+              schemaVersion: AUTOMATIC_BASELINE_SCHEMA,
+              initializing: true,
+              activatedAt,
+              pendingHints: {...(baselines[account.id]?.pendingHints ?? {})}
+            };
+            return {claimed: true};
           }
-          baselines[account.id] = {
-            schemaVersion: AUTOMATIC_BASELINE_SCHEMA,
-            initializing: true,
-            activatedAt,
-            pendingHints: {...(baselines[account.id]?.pendingHints ?? {})}
-          };
-          return {result: true};
-        });
-        if (!claimed) {
-          const currentBaselines = await messenger.storage.local.get(AUTO_BASELINES_KEY);
-          accountConfig.autoFileSince = currentBaselines[AUTO_BASELINES_KEY]?.[account.id]?.activatedAt ?? activatedAt;
+        );
+        if (!claim.committed) {
+          return {conflict: true};
+        }
+        migrationConfig = claim.config;
+        migrationStorageSnapshot = claim.config;
+        migrationBaselines = claim.baselines;
+        if (!claim.value.claimed) {
           continue;
         }
         const replacement = await captureInboxBaseline(account, activatedAt);
-        await mutateAutomaticBaselines(baselines => {
-          // Another concurrent migration may already have completed safely.
-          if (validBaselineRecord(baselines[account.id])) return;
-          const pendingHints = baselines[account.id]?.pendingHints ?? {};
-          for (const [fingerprint, count] of Object.entries(pendingHints)) {
-            const captured = replacement.counts[fingerprint] ?? 0;
-            const hinted = Math.min(count, captured);
-            if (captured > hinted) replacement.counts[fingerprint] = captured - hinted;
-            else delete replacement.counts[fingerprint];
-            replacement.hints[fingerprint] = count;
+        const finalized = await commitLoadStateRepair(
+          migrationStorageSnapshot,
+          migrationConfig,
+          (nextConfig, baselines) => {
+            // Another queued migration may already have completed safely.
+            if (validBaselineRecord(baselines[account.id])) {
+              nextConfig.accounts[account.id].autoFileSince =
+                baselines[account.id].activatedAt ?? activatedAt;
+              return;
+            }
+            const pendingHints = baselines[account.id]?.pendingHints ?? {};
+            for (const [fingerprint, count] of Object.entries(pendingHints)) {
+              const captured = replacement.counts[fingerprint] ?? 0;
+              const hinted = Math.min(count, captured);
+              if (captured > hinted) replacement.counts[fingerprint] = captured - hinted;
+              else delete replacement.counts[fingerprint];
+              replacement.hints[fingerprint] = count;
+            }
+            baselines[account.id] = replacement;
+            nextConfig.accounts[account.id].autoFileSince = activatedAt;
           }
-          baselines[account.id] = replacement;
-        });
-        accountConfig.autoFileSince = activatedAt;
+        );
+        if (!finalized.committed) {
+          return {conflict: true};
+        }
+        migrationConfig = finalized.config;
+        migrationStorageSnapshot = finalized.config;
+        migrationBaselines = finalized.baselines;
       }
-      await messenger.storage.local.set({[CONFIG_KEY]: config});
+      return {
+        conflict: false,
+        config: migrationConfig,
+        baselines: migrationBaselines
+      };
     });
     stateMigrationQueue = migrate;
-    await migrate;
-    const refreshed = await messenger.storage.local.get(AUTO_BASELINES_KEY);
-    storedBaselines = refreshed[AUTO_BASELINES_KEY] ?? storedBaselines;
+    const migration = await migrate;
+    if (migration.conflict) {
+      if (conflictRetries >= 2) {
+        throw new Error("Settings kept changing while automatic filing was initialized. Try again.");
+      }
+      return loadState(conflictRetries + 1);
+    }
+    config = migration.config;
+    storedBaselines = migration.baselines;
   }
   const automaticReviews = Object.values(stored[AUTO_SUPPRESSIONS_KEY] ?? {})
     .filter(entry => ["attempting", "review"].includes(entry?.state))
@@ -504,34 +603,18 @@ async function loadBulkSession(sessionId) {
   }
   const key = bulkSessionStorageKey(sessionId);
   const stored = await messenger.storage.session.get(key);
-  const session = stored[key];
+  let migration;
+  try {
+    migration = migrateBulkReviewSession(stored[key]);
+  } catch (error) {
+    throw new Error(`${error.message} Start a new entire-Inbox run from Settings.`);
+  }
+  const session = migration.session;
   const errors = validateBulkReviewSession(session);
   if (errors.length) {
     throw new Error(`${errors.join("; ")} Start a new entire-Inbox run from Settings.`);
   }
-  return session;
-}
-
-async function saveBulkSession(session) {
-  try {
-    await messenger.storage.session.set({
-      [CURRENT_BULK_SESSION_KEY]: session.id,
-      [bulkSessionStorageKey(session.id)]: session
-    });
-  } catch (error) {
-    throw new Error(
-      `The entire-Inbox progress was too large for Thunderbird's temporary storage. ` +
-      `Lower “Maximum messages per preview” or process a narrower window first. (${error.message})`
-    );
-  }
-}
-
-async function clearPreviousBulkSession(exceptId = null) {
-  const stored = await messenger.storage.session.get(CURRENT_BULK_SESSION_KEY);
-  const previousId = stored[CURRENT_BULK_SESSION_KEY];
-  if (previousId && previousId !== exceptId) {
-    await messenger.storage.session.remove(bulkSessionStorageKey(previousId));
-  }
+  return migration;
 }
 
 async function buildBulkBatch(session) {
@@ -547,16 +630,15 @@ async function buildBulkBatch(session) {
     bulk: {
       sessionId: session.id,
       batchNumber: session.totals.batches + 1,
-      examinedCounts: session.recordedOccurrences
+      examinedMessageIds: session.recordedMessageIds
     }
   }, config);
   const nextSession = mergeBulkBatch(session, plan);
-  await saveBulkSession(nextSession);
-  delete plan.bulkExaminedCounts;
+  delete plan.bulkExaminedMessageIds;
   plan.bulk = publicBulkProgress(nextSession, plan);
   plan.title = `Process entire Inbox — batch ${nextSession.totals.batches}`;
   plan.description = `${plan.accountName} · all dates · safe review batches`;
-  return storePlan(plan);
+  return storeBulkPlanAndSession(plan, nextSession, messenger.storage.session);
 }
 
 async function createFirstBulkPlan(accountId) {
@@ -567,8 +649,6 @@ async function createFirstBulkPlan(accountId) {
     configRevision: config.revision,
     request: {kind: "organize", source: "inbox", accountId, days: 0}
   });
-  await clearPreviousBulkSession(session.id);
-  await saveBulkSession(session);
   return buildBulkBatch(session);
 }
 
@@ -577,8 +657,8 @@ async function createNextBulkPlan(planId) {
   if (!plan.bulk?.sessionId) {
     throw new Error("This preview is not part of an entire-Inbox run.");
   }
-  const session = await loadBulkSession(plan.bulk.sessionId);
-  if (session.totals.batches !== plan.bulk.batchNumber) {
+  const {session, migrated} = await loadBulkSession(plan.bulk.sessionId);
+  if (!migrated && session.totals.batches !== plan.bulk.batchNumber) {
     throw new Error("A newer batch already exists for this entire-Inbox run.");
   }
   return buildBulkBatch(session);
@@ -671,18 +751,18 @@ async function runContactBackfill() {
     try {
       if (!accountConfig.customerRootReady) {
         throw new Error(
-          "The customer root is not approved. Run Save & set up folders first."
+          "The domain root has not been set up. Choose Save & set up first."
         );
       }
       if (state.managedContactBookErrors?.[account.id]) {
         throw new Error(
-          `${state.managedContactBookErrors[account.id]} Run Save & set up folders first.`
+          `${state.managedContactBookErrors[account.id]} Choose Save & set up first.`
         );
       }
       const storedBook = state.managedContactBooks?.[account.id];
       if (!storedBook?.addressBookId) {
         throw new Error(
-          "The managed customer address book is not ready. Run Save & set up folders first."
+          "The managed customer address book is not ready. Choose Save & set up first."
         );
       }
 
@@ -769,7 +849,7 @@ async function openPlan(plan) {
   });
 }
 
-async function saveConfigNow(rawConfig) {
+async function saveConfigNow(rawConfig, {preserveVerifiedReadiness = false} = {}) {
   const accounts = await listAccounts();
   const stored = await messenger.storage.local.get([CONFIG_KEY, CONTACT_BOOKS_KEY]);
   const current = normalizeConfig(stored[CONFIG_KEY], accounts);
@@ -779,35 +859,28 @@ async function saveConfigNow(rawConfig) {
   const initializingAccounts = [];
   for (const [accountId, accountConfig] of Object.entries(normalized.accounts)) {
     const currentAccount = current.accounts[accountId];
-    const requestedAutomatic = accountConfig.autoFileIncoming;
-    accountConfig.customerRootReady = Boolean(
-      currentAccount?.customerRootReady &&
-      currentAccount.rootFolderName === accountConfig.rootFolderName
+    accountConfig.initialized = true;
+    const requestedAutomatic = Boolean(
+      accountConfig.enabled && accountConfig.autoFileRequested
     );
-    accountConfig.archiveReady = Boolean(
-      currentAccount?.archiveReady &&
-      currentAccount.archiveFolderName === accountConfig.archiveFolderName
-    );
-    // Changing the approved root invalidates the automation ownership
-    // boundary. Fail closed instead of keeping an invisible active setting.
-    if (!accountConfig.customerRootReady) {
-      accountConfig.autoFileIncoming = false;
-    }
-    if (requestedAutomatic && !accountConfig.autoFileIncoming) {
-      throw new Error(
-        "Automatic filing requires an approved customer root. Save the root name, run Save & set up folders, then enable automatic filing."
-      );
-    }
-    if (
+    accountConfig.customerRootReady = preserveVerifiedReadiness
+      ? Boolean(accountConfig.customerRootReady)
+      : Boolean(
+          currentAccount?.customerRootReady &&
+          currentAccount.rootFolderName === accountConfig.rootFolderName
+        );
+    accountConfig.archiveReady = preserveVerifiedReadiness
+      ? Boolean(accountConfig.archiveReady)
+      : Boolean(
+          currentAccount?.archiveReady &&
+          currentAccount.archiveFolderName === accountConfig.archiveFolderName
+        );
+    let automaticReady = Boolean(
       requestedAutomatic &&
-      accountConfig.autoFileIncoming &&
-      !managedContactBooks[accountId]?.addressBookId
-    ) {
-      throw new Error(
-        "Automatic filing and contact capture require a managed address book. Run Save & set up folders first."
-      );
-    }
-    if (requestedAutomatic && accountConfig.autoFileIncoming) {
+      accountConfig.customerRootReady &&
+      managedContactBooks[accountId]?.addressBookId
+    );
+    if (automaticReady) {
       const account = accounts.find(candidate => candidate.id === accountId);
       try {
         await validateManagedContactBook(
@@ -815,12 +888,14 @@ async function saveConfigNow(rawConfig) {
           managedContactBooks[accountId],
           messenger
         );
-      } catch (error) {
-        throw new Error(
-          `Automatic filing and contact capture are not ready for ${account?.name ?? accountId}: ${error.message} Run Save & set up folders first.`
-        );
+      } catch {
+        automaticReady = false;
       }
     }
+    // Keep the user's requested preference while setup is incomplete, but
+    // never let the runtime flag become true until every ownership boundary
+    // and managed contact destination has been validated.
+    accountConfig.autoFileIncoming = automaticReady;
     const newlyEnabled = accountConfig.autoFileIncoming && !currentAccount?.autoFileIncoming;
     if (newlyEnabled) {
       const account = accounts.find(candidate => candidate.id === accountId);
@@ -948,9 +1023,38 @@ async function handleCommand(message) {
         const result = await setupAllCustomerFolders(
           state.config,
           state.accounts,
-          messenger,
-          {folderApprovals: message.folderApprovals ?? {}}
+          messenger
         );
+        const importedCustomers = [];
+        for (const account of state.accounts) {
+          const accountConfig = state.config.accounts?.[account.id];
+          if (!accountConfig?.enabled || !accountConfig.customerRootReady) continue;
+          try {
+            const discovery = await discoverExistingCustomerFolders(
+              account,
+              accountConfig.rootFolderName,
+              messenger
+            );
+            const proposals = proposeCustomersFromFolders(
+              discovery.folders,
+              account.id,
+              state.config.customers
+            );
+            state.config.customers.push(...proposals);
+            importedCustomers.push(...proposals.map(customer => ({
+              accountId: account.id,
+              accountName: account.name,
+              customerName: customer.name,
+              folderName: customer.folderName,
+              enabled: customer.enabled,
+              warning: customer.warning
+            })));
+          } catch (error) {
+            result.errors.push(
+              `${account.name} / ${accountConfig.rootFolderName}: could not import existing domain folders: ${error.message}`
+            );
+          }
+        }
         const managedContactBooks = structuredClone(state.managedContactBooks ?? {});
         const contactBooks = [];
         for (const account of state.accounts) {
@@ -984,12 +1088,13 @@ async function handleCommand(message) {
             result.errors.push(`${account.name} / customer contacts: ${error.message}`);
           }
         }
-        await messenger.storage.local.set({
-          [CONFIG_KEY]: state.config,
-          [CONTACT_BOOKS_KEY]: managedContactBooks
-        });
+        const savedConfig = await saveConfigNow(
+          state.config,
+          {preserveVerifiedReadiness: true}
+        );
         result.contactBooks = contactBooks;
-        return {result, config: state.config, managedContactBooks};
+        result.importedCustomers = importedCustomers;
+        return {result, config: savedConfig, managedContactBooks};
       });
     }
     case "backfillContacts":

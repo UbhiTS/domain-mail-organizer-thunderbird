@@ -16,15 +16,21 @@ or publish the corresponding GitHub Release so the source snapshot exists.
 - Open **See full validation report** and confirm that no additional warning
   category is present.
 - The manifest declares `data_collection_permissions.required: ["none"]`
-  because the extension does not collect or transmit user data.
+  because no user data is transmitted outside the add-on or local Thunderbird
+  profile; all processing and storage described below remain local.
 
 ## Version notes
 
 Paste the following into **Version notes**:
 
 > Adds automatic customer-contact capture paired with automatic Inbox filing.
+> New accounts default to `Domains` and `Archive`; setup safely reuses those
+> exact ordinary folders or creates them when absent, and imports direct
+> domain-named children as account-scoped rules. Automatic filing and eligible
+> exact internal identity domains start selected but remain dormant until setup
+> verifies the folder and contact-book destinations.
 > Folder setup creates one managed local address book per enabled mail account;
-> after an accepted automatic move, exact customer-owned From/To/Cc/Bcc
+> after Thunderbird confirms an automatic destination move, exact rule-matching From/To/Cc/Bcc
 > addresses are added there. Users may separately select exact domains derived
 > from each mail account's Thunderbird identities; matching coworkers are then
 > captured from the same customer-mail headers and tagged with that domain.
@@ -45,9 +51,9 @@ Paste the following into **Version notes**:
 > unless that subdomain is configured separately. All processing remains local,
 > with no telemetry, advertising, remote code, external service, or host/network
 > permission.
-> Existing users upgrading from 0.1.8 must run Save & set up folders once to
-> create the managed contact book, then re-enable automatic filing. Automation
-> pauses safely until that explicit setup is complete.
+> Existing users upgrading from 0.1.8 must run Save & set up once to
+> create the managed contact book. Their existing automatic-filing choice is
+> preserved, and automation pauses safely until setup is complete.
 
 ## Notes for reviewers
 
@@ -62,22 +68,37 @@ Paste the following into **Notes for Reviewers**:
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.12
 >
-> The packaged JavaScript, HTML, and CSS are readable source files. There is no
-> minification, transpilation, bundling, obfuscation, eval, remote code, or
-> runtime code download. The build script only creates deterministic ZIP/XPI
-> archives from extension/ and adds LICENSE and NOTICE.
+> All first-party packaged JavaScript, HTML, and CSS are readable source files.
+> First-party code is not minified, transpiled, bundled, or obfuscated, and the
+> add-on uses no eval, remote code, or runtime code download. The only generated
+> distribution file is the exact, unmodified upstream `psl` third-party file
+> identified below. The build script creates ZIP/XPI archives from extension/
+> and adds LICENSE and NOTICE.
 >
-> Reproducible build (Node.js 22 or 24; npm):
+> Build instructions (Node.js 22 or 24; npm):
 > 1. npm ci --ignore-scripts
 > 2. npm run check
 > 3. npm run build
 > Output: artifacts/domain-mail-organizer-0.1.12.xpi and .zip.
 >
-> Third-party library: psl 1.15.0, vendored unmodified as
-> extension/vendor/psl.mjs. Source:
+> Third-party library: `psl` 1.15.0, vendored unmodified as
+> extension/vendor/psl.mjs. The included file is the upstream generated
+> distribution file at:
+> https://github.com/lupomontero/psl/blob/v1.15.0/dist/psl.mjs
+> SHA-256: 66463ab217d9ac57174eb89b100058b450588ce6c8da577e6bf41c074d6514b7
+> The readable parser source and generated rule-data source for that exact
+> tagged release are:
+> https://github.com/lupomontero/psl/blob/v1.15.0/index.js
+> https://github.com/lupomontero/psl/blob/v1.15.0/data/rules.js
+> Complete tagged source:
+> https://github.com/lupomontero/psl/tree/v1.15.0
+> Package release metadata:
 > https://www.npmjs.com/package/psl/v/1.15.0
-> Its MIT license is extension/vendor/PSL-LICENSE.txt and provenance is in
-> VENDOR.md. No other third-party runtime code is included.
+> The parser's MIT license is extension/vendor/PSL-LICENSE.txt. Its embedded
+> rule data is based on the Mozilla Public Suffix List, whose source and MPL 2.0
+> notice are at:
+> https://publicsuffix.org/list/public_suffix_list.dat
+> No other third-party runtime code is included.
 >
 > Permission purposes:
 > - accountsRead: enumerate the user's configured Thunderbird accounts and
@@ -85,8 +106,8 @@ Paste the following into **Notes for Reviewers**:
 > - accountsFolders: create only explicitly configured organizer folders.
 > - addressBooks: create one managed local contacts book per enabled
 >   account, check all address books for exact-email duplicates, and add exact
->   customer-owned or explicitly approved identity-domain header addresses
->   following accepted automatic moves or the reviewer's explicit existing-mail
+>   customer-rule-matching or explicitly approved identity-domain header addresses
+>   following confirmed automatic destination moves or the reviewer's explicit existing-mail
 >   backfill request.
 > - messagesRead: read message headers and optional locally fetched body text
 >   for matching and previews.
@@ -99,18 +120,23 @@ Paste the following into **Notes for Reviewers**:
 > Functional test:
 > 1. Install in Thunderbird 140+ with a disposable mail account or test profile.
 > 2. Open the toolbar popup, then Settings & customer rules.
-> 3. Enable a test account, add a customer with example.com, and choose Save &
->    set up folders. Confirm a uniquely named local `Customer Contacts — …` address book
+> 3. Before setup, create ordinary test folders `Domains`, `Archive`, and
+>    `Domains/example.com`. Enable the test account and choose Save & set up.
+>    Confirm the first two same-name folders are reused and the
+>    direct `example.com` child is imported as a scoped exact-domain rule
+>    (or that the same folders are created when absent), and confirm a uniquely
+>    named local `Customer Contacts — …` address book
 >    is also created; an unrelated exact-name collision is refused rather than
 >    adopted or overwritten.
 > 4. Choose Process Inbox or preview selected test messages. Preview itself creates/moves
 >    nothing; select Apply to perform proposed moves.
 > 5. Verify person@example.com matches and person@mail.example.com remains
 >    unmatched unless mail.example.com is explicitly configured.
-> 6. Automatic filing remains unavailable until the account-local customer root
->    is explicitly set up.
+> 6. Automatic filing remains dormant until the account-local domain root and
+>    managed contact book are verified by setup, even though the new-account
+>    preference starts selected.
 > 7. Enable automatic filing and receive a new person@example.com message.
->    After its accepted move, confirm the exact customer-owned From/To/Cc/Bcc
+>    After Thunderbird confirms its destination move, confirm the exact rule-matching From/To/Cc/Bcc
 >    address is added once. Own identities, unconfigured subdomains, subject/body
 >    addresses, and addresses already present in any address book are not added.
 >    Previewed, manually applied, or externally moved messages do not add contacts.
@@ -119,7 +145,7 @@ Paste the following into **Notes for Reviewers**:
 >    while the reviewer's own identity and subdomain/lookalike addresses are not.
 > 8. Put existing messages in the configured direct customer folder and one of
 >    its subfolders, then choose Build address books from existing mail in
->    Settings. Confirm it scans all dates/pages and adds exact customer-owned
+>    Settings. Confirm it scans all dates/pages and adds exact rule-matching
 >    From/To/Cc/Bcc addresses. With internal capture enabled for the test
 >    identity domain, confirm an exact coworker is also added once with that
 >    domain as ORG, while subdomain/lookalike and own-identity addresses are not
@@ -130,8 +156,8 @@ Paste the following into **Notes for Reviewers**:
 >    toolbar popup. Confirm messages across all dates/pages are read and all
 >    available From/To/Cc/Bcc addresses are listed, including own or unrelated
 >    addresses, without reading bodies or writing contacts.
-> 10. Confirm Process entire Inbox and Recover from Organizer Archive appear
->    under Mail processing tools in Settings rather than in the toolbar popup.
+> 10. Confirm Process entire Inbox and Recover from Archive appear under
+>    Mailbox tools in Settings rather than in the toolbar popup.
 >
 > All processing is local. The extension makes no host/network requests and
 > transmits no mailbox data or telemetry. It never updates, merges, or deletes
@@ -141,9 +167,11 @@ Paste the following into **Notes for Reviewers**:
 
 ## Source-code upload field
 
-The submitted XPI contains readable, unminified source and does not transform
-the runtime code, so a separate source upload is generally unnecessary. If ATN
-requests one, use the repository tag archive—not the installable release ZIP:
+The submitted XPI contains readable, untransformed first-party source. Its only
+generated distribution file is the exact, unmodified third-party `psl` 1.15.0
+file linked above, with the readable source for that tagged release also linked.
+A separate source upload is therefore generally unnecessary. If ATN requests
+one, use the repository tag archive—not the installable release ZIP:
 
 https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.12.zip
 

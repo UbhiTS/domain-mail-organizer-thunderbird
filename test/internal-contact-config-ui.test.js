@@ -16,7 +16,9 @@ test("Settings exposes explicit per-account internal coworker capture", () => {
   assert.match(html, /Capture internal coworkers from customer mail/u);
   assert.match(script, /internalDomainsFromIdentities\(account\.identities\)/u);
   assert.match(script, /checkbox\.className = "capture-internal-domain"/u);
-  assert.match(script, /checkbox\.checked = savedSet\.has\(domain\)/u);
+  assert.match(script, /checkbox\.checked = !value\.initialized \|\| savedSet\.has\(domain\)/u);
+  assert.match(script, /autoFile\.checked = value\.autoFileRequested !== false/u);
+  assert.match(script, /next\.accounts\[card\.dataset\.accountId\] = \{\s+initialized: true,/u);
   assert.match(script, /Your own identity addresses are excluded/u);
   assert.match(script, /shared consumer domain and may add unrelated people/u);
   assert.match(script, /internalContactDomains\s*\n\s*\};/u);

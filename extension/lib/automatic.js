@@ -146,7 +146,7 @@ export function createAutomaticFiler({
       // child for a configured customer. It must never adopt an arbitrary root
       // that merely has the configured name.
       if (!accountConfig.customerRootReady) {
-        const error = "Run Save & set up folders once before enabling automatic filing";
+        const error = "Choose Save & set up once before enabling automatic filing";
         await saveLastRun({
           kind: "automatic",
           title: "Automatic Inbox filing",
@@ -195,8 +195,15 @@ export function createAutomaticFiler({
               const outcome = await confirmMove(descriptor, operation);
               await mutateSuppressions(state => {
                 if (!state[attemptId]) return;
-                state[attemptId].state = "confirmed";
-                state[attemptId].confirmedAt = new Date().toISOString();
+                if (outcome?.status === "accepted") {
+                  state[attemptId].state = "review";
+                  state[attemptId].reason =
+                    "Thunderbird accepted the move, but Inbox reconciliation has not confirmed removal";
+                  state[attemptId].updatedAt = new Date().toISOString();
+                } else {
+                  state[attemptId].state = "confirmed";
+                  state[attemptId].confirmedAt = new Date().toISOString();
+                }
               });
               return outcome;
             } catch (error) {
@@ -228,7 +235,13 @@ export function createAutomaticFiler({
           stableList.messages.map(message => [message.id, message])
         );
         const completed = (result.results ?? [])
-          .filter(itemResult => itemResult.status === "completed")
+          // A resolved move without onMoved proof remains a conservative
+          // Inbox-reconciliation claim. Do not persist header-derived contacts
+          // until Thunderbird has actually confirmed the destination move.
+          .filter(itemResult =>
+            itemResult.status === "completed" &&
+            itemResult.moveConfirmationStatus !== "accepted"
+          )
           .map(itemResult => {
             const item = itemById.get(itemResult.itemId);
             const message = item ? messageById.get(item.messageId) : null;

@@ -350,7 +350,7 @@ async function applySelected() {
     ? `\n\n${foldersToCreate.size} missing destination folder${foldersToCreate.size === 1 ? "" : "s"} will be created:\n${[...foldersToCreate].map(name => `• ${name}`).join("\n")}`
     : "";
   const archiveNotice = plan.kind === "archive"
-    ? `\n\nOrganizer Archive scope: ${plan.description}. Exactly ${ids.length} selected message${ids.length === 1 ? "" : "s"} will be moved to the dedicated organizer archive folder.`
+    ? `\n\nArchive scope: ${plan.description}. Exactly ${ids.length} selected message${ids.length === 1 ? "" : "s"} will be moved to the configured dedicated archive folder.`
     : "";
   const confirmed = window.confirm(
     `Apply ${ids.length} action${ids.length === 1 ? "" : "s"}? This will ${verb} the selected messages.${archiveNotice}${folderNotice}`

@@ -5,5 +5,18 @@ This project is licensed under the MIT License. The copyright and permission
 notice in LICENSE must be retained in copies or substantial portions of the
 software.
 
-The vendored Public Suffix List parser in extension/vendor is separately
-attributed and licensed in VENDOR.md and extension/vendor/PSL-LICENSE.txt.
+This distribution includes the exact, unmodified `dist/psl.mjs` file from
+`psl` 1.15.0:
+https://github.com/lupomontero/psl/blob/v1.15.0/dist/psl.mjs
+
+`psl` is Copyright (c) 2017 Lupo Montero <lupomontero@gmail.com> and is
+licensed under the MIT License. Its complete license text is included at
+vendor/PSL-LICENSE.txt in the packaged add-on. Readable source for the exact
+tagged release is available at:
+https://github.com/lupomontero/psl/tree/v1.15.0
+
+The embedded rule data is based on the Mozilla Public Suffix List. The list's
+source code form is subject to the Mozilla Public License 2.0 and is available,
+together with its license notice, at:
+https://publicsuffix.org/list/public_suffix_list.dat
+https://mozilla.org/MPL/2.0/

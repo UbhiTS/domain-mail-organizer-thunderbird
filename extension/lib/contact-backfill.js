@@ -36,17 +36,17 @@ async function assertApprovedRoot(account, accountConfig, expectedId, api) {
     throw new Error("The selected mail account is not enabled.");
   }
   if (!accountConfig.customerRootReady) {
-    throw new Error("The customer root is not approved. Run folder setup first.");
+    throw new Error("The domain root has not been set up. Run folder setup first.");
   }
   const root = await resolveCustomerRoot(account, accountConfig, false, api);
   if (!root?.id) {
-    throw new Error("The approved customer root folder is missing. Run folder setup again.");
+    throw new Error("The configured domain root folder is missing. Run folder setup again.");
   }
   if (root.accountId && root.accountId !== account.id) {
-    throw new Error("The approved customer root belongs to a different mail account.");
+    throw new Error("The configured domain root belongs to a different mail account.");
   }
   if (expectedId !== undefined && root.id !== expectedId) {
-    throw new Error("The approved customer root changed during the scan. Start a new scan.");
+    throw new Error("The configured domain root changed during the scan. Start a new scan.");
   }
   return root;
 }

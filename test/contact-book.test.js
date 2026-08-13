@@ -312,7 +312,7 @@ test("import deduplicates exact normalized emails across every address book", as
   assert.equal(result.failed, 0);
   assert.equal(created.length, 1);
   assert.equal(created[0].bookId, "managed");
-  assert.match(created[0].vCard, /FN:Bob\r\n/u);
+  assert.match(created[0].vCard, /FN:bob@acme\.example\r\n/u);
   assert.match(created[0].vCard, /EMAIL:bob@acme\.example\r\n/u);
   assert.match(created[0].vCard, /ORG:Acme\\, Inc\.\r\n/u);
 });

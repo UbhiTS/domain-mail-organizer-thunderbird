@@ -32,7 +32,7 @@ export function findSpecialFolder(account, specialUse) {
 
 export async function listAccounts(api = messenger) {
   const accounts = await api.accounts.list(true);
-  return accounts.filter(account => ["imap", "pop3", "local", "none", "ews"].includes(account.type));
+  return accounts.filter(account => ["imap", "pop3", "ews"].includes(account.type));
 }
 
 export async function getAccount(accountId, api = messenger) {
@@ -114,7 +114,7 @@ async function ensureChild(
   if (child || !create) {
     if (child && !allowExisting) {
       throw new Error(
-        `Folder “${childName}” already exists and is not an approved organizer destination.`
+        `Folder “${childName}” already exists but is not the destination selected by this plan. Run setup and create a new preview.`
       );
     }
     return child;
@@ -163,7 +163,7 @@ export async function resolveCustomerRoot(account, accountConfig, create, api = 
   const existing = await findDirectChild(root, accountConfig.rootFolderName, api);
   if (existing && folderCannotBeOrganizerDestination(existing)) {
     throw new Error(
-      `Folder “${accountConfig.rootFolderName}” is now a special-use folder and cannot be the customer root.`
+      `Folder “${accountConfig.rootFolderName}” is now a special-use folder and cannot be the domain root.`
     );
   }
   if (!accountConfig.customerRootReady) {
@@ -172,7 +172,7 @@ export async function resolveCustomerRoot(account, accountConfig, create, api = 
     }
     if (existing) {
       throw new Error(
-        `Folder “${accountConfig.rootFolderName}” already exists and is not an approved organizer root. Choose an unused name.`
+        `Folder “${accountConfig.rootFolderName}” already exists but has not been verified. Choose Save & set up first.`
       );
     }
     const created = await createChildStrict(root, accountConfig.rootFolderName, api);
@@ -196,7 +196,7 @@ export async function resolveOrganizerArchive(
   const existing = await findDirectChild(root, accountConfig.archiveFolderName, api);
   if (existing && folderCannotBeOrganizerDestination(existing)) {
     throw new Error(
-      `Folder “${accountConfig.archiveFolderName}” is now a special-use folder and cannot be the organizer archive.`
+      `Folder “${accountConfig.archiveFolderName}” is now a special-use folder and cannot be the configured archive.`
     );
   }
   if (!accountConfig.archiveReady && !requireNew) {
@@ -204,7 +204,7 @@ export async function resolveOrganizerArchive(
   }
   if (requireNew && existing) {
     throw new Error(
-      `Folder “${accountConfig.archiveFolderName}” already exists. Choose an unused organizer archive name or explicitly rename that folder before setup.`
+      `Folder “${accountConfig.archiveFolderName}” already exists. Choose Save & set up to verify that archive slot.`
     );
   }
   const archive = existing ?? (
@@ -239,13 +239,13 @@ export async function resolveCustomerFolder(
       : !root || root.id !== expectedRootFolderId;
     if (rootChanged) {
       throw new Error(
-        `The customer root changed after preview. Create a fresh preview before applying.`
+        `The domain root changed after preview. Create a fresh preview before applying.`
       );
     }
   }
   if (!root && expectedExistingFolderId) {
     throw new Error(
-      `The customer root changed after preview. Create a fresh preview before applying.`
+      `The domain root changed after preview. Create a fresh preview before applying.`
     );
   }
   if (!root && create) {
@@ -259,7 +259,7 @@ export async function resolveCustomerFolder(
   if (!root) {
     if (expectedExistingFolderId) {
       throw new Error(
-        `The customer root changed after preview. Create a fresh preview before applying.`
+        `The domain root changed after preview. Create a fresh preview before applying.`
       );
     }
     return null;
@@ -311,8 +311,8 @@ export async function discoverCustomerFolders(account, accountConfig, api = mess
 }
 
 /**
- * Read-only discovery for an existing, not-yet-approved customer root. Only
- * direct normal child folders are returned; no folder is created or approved.
+ * Read-only discovery for an existing domain root. Only direct normal child
+ * folders are returned; no folder is created or marked ready.
  */
 export async function discoverExistingCustomerFolders(
   account,
@@ -326,7 +326,7 @@ export async function discoverExistingCustomerFolders(
     throw new Error(`No existing folder named “${rootFolderName}” was found.`);
   }
   if (folderCannotBeOrganizerDestination(existingRoot)) {
-    throw new Error(`Folder “${rootFolderName}” is special-use and cannot be a customer root.`);
+    throw new Error(`Folder “${rootFolderName}” is special-use and cannot be a domain root.`);
   }
   const rootCapabilities = await api.folders.getFolderCapabilities(existingRoot.id);
   if (rootCapabilities?.canAddSubfolders === false) {
@@ -356,22 +356,10 @@ export async function discoverExistingCustomerFolders(
   };
 }
 
-function exactApproval(approvals, accountId, accountConfig) {
-  const approval = approvals?.[accountId];
-  if (!approval || typeof approval !== "object") return {};
-  return {
-    adoptExistingRoot: approval.adoptExistingRoot === true &&
-      approval.rootFolderName === accountConfig.rootFolderName,
-    adoptExistingArchive: approval.adoptExistingArchive === true &&
-      approval.archiveFolderName === accountConfig.archiveFolderName
-  };
-}
-
 export async function setupAllCustomerFolders(
   config,
   accounts,
-  api = messenger,
-  options = {}
+  api = messenger
 ) {
   const createdOrFound = [];
   const errors = [];
@@ -381,33 +369,21 @@ export async function setupAllCustomerFolders(
     if (!accountConfig?.enabled) {
       continue;
     }
-    const approval = exactApproval(options.folderApprovals, account.id, accountConfig);
+    // Readiness is proven anew by this setup run. Never preserve a stale
+    // readiness marker after a failed folder validation.
+    accountConfig.archiveReady = false;
+    accountConfig.customerRootReady = false;
     try {
-      let archiveFolder;
-      if (!accountConfig.archiveReady && approval.adoptExistingArchive) {
-        archiveFolder = await findDirectChild(
-          account.rootFolder,
-          accountConfig.archiveFolderName,
-          api
-        );
-        if (!archiveFolder) {
-          throw new Error(`No existing folder named “${accountConfig.archiveFolderName}” was found.`);
-        }
-        if (folderCannotBeOrganizerDestination(archiveFolder)) {
-          throw new Error(`Folder “${accountConfig.archiveFolderName}” is special-use and cannot be adopted.`);
-        }
-        const capabilities = await api.folders.getFolderCapabilities(archiveFolder.id);
-        if (capabilities?.canAddMessages === false) {
-          throw new Error(`Folder “${accountConfig.archiveFolderName}” cannot receive messages.`);
-        }
-      } else {
-        archiveFolder = await resolveOrganizerArchive(
-          account,
-          accountConfig,
-          true,
-          api,
-          !accountConfig.archiveReady
-        );
+      const archiveFolder = await ensureChild(
+        account.rootFolder,
+        accountConfig.archiveFolderName,
+        true,
+        api,
+        true
+      );
+      const archiveCapabilities = await api.folders.getFolderCapabilities(archiveFolder.id);
+      if (archiveCapabilities?.canAddMessages === false) {
+        throw new Error(`Folder “${accountConfig.archiveFolderName}” cannot receive messages.`);
       }
       accountConfig.archiveReady = true;
       createdOrFound.push({
@@ -427,20 +403,8 @@ export async function setupAllCustomerFolders(
         accountConfig.rootFolderName,
         api
       );
-      if (
-        !accountConfig.customerRootReady &&
-        existingRoot &&
-        !approval.adoptExistingRoot
-      ) {
-        throw new Error(
-          `Folder “${accountConfig.rootFolderName}” already exists and is not an approved organizer root. Choose an unused name.`
-        );
-      }
       if (existingRoot && folderCannotBeOrganizerDestination(existingRoot)) {
-        throw new Error(`Folder “${accountConfig.rootFolderName}” is special-use and cannot be adopted.`);
-      }
-      if (!accountConfig.customerRootReady && approval.adoptExistingRoot && !existingRoot) {
-        throw new Error(`No existing folder named “${accountConfig.rootFolderName}” was found.`);
+        throw new Error(`Folder “${accountConfig.rootFolderName}” is special-use and cannot be used.`);
       }
       customerRoot = existingRoot;
       if (customerRoot) {
@@ -455,8 +419,12 @@ export async function setupAllCustomerFolders(
           accountConfig.rootFolderName,
           true,
           api,
-          false
+          true
         );
+      }
+      const rootCapabilities = await api.folders.getFolderCapabilities(customerRoot.id);
+      if (rootCapabilities?.canAddSubfolders === false) {
+        throw new Error(`Folder “${accountConfig.rootFolderName}” cannot contain domain folders.`);
       }
       accountConfig.customerRootReady = true;
     } catch (error) {
@@ -498,7 +466,7 @@ export async function setupAllCustomerFolders(
             customer.folderName,
             true,
             api,
-            false
+            true
           );
           existingByName.set(normalizedName, folder);
         }

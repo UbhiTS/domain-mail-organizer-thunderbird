@@ -23,13 +23,32 @@ function baseCustomer(overrides = {}) {
 
 test("normalization fills account defaults and sanitizes matchers", () => {
   const normalized = normalizeConfig({customers: [baseCustomer()]}, accounts);
-  assert.equal(normalized.accounts.work.rootFolderName, "Customers");
+  assert.equal(normalized.accounts.work.rootFolderName, "Domains");
   assert.equal(normalized.accounts.work.customerRootReady, false);
-  assert.equal(normalized.accounts.work.archiveFolderName, "Organizer Archive");
+  assert.equal(normalized.accounts.work.archiveFolderName, "Archive");
   assert.equal(normalized.accounts.work.archiveReady, false);
   assert.equal(normalized.accounts.work.enabled, false);
+  assert.equal(normalized.accounts.work.initialized, false);
+  assert.equal(normalized.accounts.work.autoFileRequested, true);
   assert.deepEqual(normalized.accounts.work.internalContactDomains, []);
   assert.deepEqual(normalized.customers[0].domains, ["acme.com"]);
+});
+
+test("new defaults do not overwrite legacy opt-outs and malformed account records fail safe", () => {
+  const normalized = normalizeConfig({
+    accounts: {
+      work: {autoFileIncoming: false, internalContactDomains: []},
+      other: null
+    }
+  }, accounts);
+
+  assert.equal(normalized.accounts.work.initialized, true);
+  assert.equal(normalized.accounts.work.autoFileRequested, false);
+  assert.equal(normalized.accounts.work.autoFileIncoming, false);
+  assert.deepEqual(normalized.accounts.work.internalContactDomains, []);
+  assert.equal(normalized.accounts.other.initialized, true);
+  assert.equal(normalized.accounts.other.autoFileRequested, false);
+  assert.doesNotThrow(() => normalizeConfig(null, accounts));
 });
 
 test("internal contact domains normalize without being enabled by default", () => {

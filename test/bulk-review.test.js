@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   createBulkReviewSession,
-  createFingerprintSkipper,
+  createMessageIdSkipper,
+  migrateBulkReviewSession,
   mergeBulkBatch,
   mergePlanScanDelta,
   publicBulkProgress,
   publicBulkReviewProgress,
-  recordFingerprintOccurrences,
+  recordMessageIds,
   validateBulkReviewSession
 } from "../extension/lib/bulk-review.js";
-import {messageFingerprint} from "../extension/lib/fingerprint.js";
 
 const CREATED_AT = "2026-08-12T20:00:00.000Z";
 
@@ -62,38 +62,34 @@ test("new bulk-review sessions are canonical, isolated, and empty", () => {
     nested: {a: 1, z: 2},
     source: "inbox"
   });
-  assert.deepEqual(state.recordedOccurrences, {});
+  assert.deepEqual(state.recordedMessageIds, []);
   assert.deepEqual(state.committedPlanIds, []);
   assert.equal(state.totals.batches, 0);
   assert.equal(state.exhausted, false);
   assert.deepEqual(validateBulkReviewSession(state), []);
 });
 
-test("fingerprint recording is immutable and preserves duplicate occurrences", () => {
-  const duplicate = message(1);
-  const counts = recordFingerprintOccurrences({}, [duplicate, {...duplicate}, message(2)]);
+test("message id recording is immutable and rejects duplicate ids", () => {
+  const ids = recordMessageIds([], [message(1), message(2)]);
 
-  assert.equal(counts[messageFingerprint(duplicate)], 2);
-  assert.equal(counts[messageFingerprint(message(2))], 1);
-  const extended = recordFingerprintOccurrences(counts, [duplicate]);
-  assert.equal(counts[messageFingerprint(duplicate)], 2);
-  assert.equal(extended[messageFingerprint(duplicate)], 3);
+  assert.deepEqual(ids, [1, 2]);
+  const extended = recordMessageIds(ids, [message(3)]);
+  assert.deepEqual(ids, [1, 2]);
+  assert.deepEqual(extended, [1, 2, 3]);
+  assert.throws(() => recordMessageIds(ids, [{...message(1), headerMessageId: "different"}]), /repeats/u);
 });
 
-test("the multiset skipper claims only the recorded number of duplicates", () => {
-  const duplicate = message(1);
-  const other = message(2);
-  const recorded = recordFingerprintOccurrences({}, [duplicate, duplicate]);
-  const skipper = createFingerprintSkipper(recorded);
+test("the id skipper ignores only exact session-scoped message ids", () => {
+  const skipper = createMessageIdSkipper([1, 2]);
 
-  assert.equal(skipper.shouldSkip(duplicate), true);
-  assert.equal(skipper.shouldSkip({...duplicate}), true);
-  assert.equal(skipper.shouldSkip({...duplicate, id: 999}), false);
-  assert.equal(skipper.shouldSkip(other), false);
+  assert.equal(skipper.shouldSkip(message(1)), true);
+  assert.equal(skipper.shouldSkip({...message(1), headerMessageId: "different"}), true);
+  assert.equal(skipper.shouldSkip({...message(1), id: 999}), false);
+  assert.equal(skipper.shouldSkip(message(3)), false);
   assert.deepEqual(skipper.progress(), {
     skippedCount: 2,
-    claimedOccurrences: {[messageFingerprint(duplicate)]: 2},
-    remainingOccurrences: {}
+    claimedMessageIds: [1],
+    remainingMessageIds: [2]
   });
 });
 
@@ -123,7 +119,7 @@ test("merging a plan delta records progress without retaining move authority", (
   assert.equal(merged.totals.examined, 7);
   assert.equal(merged.totals.skippedRecorded, 5);
   assert.equal(merged.totals.presented, 2);
-  assert.equal(merged.recordedOccurrences[messageFingerprint(first)], 1);
+  assert.deepEqual(merged.recordedMessageIds, [1, 2]);
   assert.equal("messages" in merged, false);
   assert.equal("action" in merged, false);
   assert.equal("destinationFolderId" in merged, false);
@@ -178,7 +174,7 @@ test("validation rejects malformed or stale session ownership", () => {
   }), []);
 
   const corrupt = structuredClone(state);
-  corrupt.recordedOccurrences.not_a_fingerprint = 1;
+  corrupt.recordedMessageIds = [1, 1];
   corrupt.totals.presented = 2;
   const errors = validateBulkReviewSession(corrupt, {
     accountId: "other",
@@ -186,7 +182,7 @@ test("validation rejects malformed or stale session ownership", () => {
     request: {kind: "archive", accountId: "work"}
   });
 
-  assert.ok(errors.some(error => error.includes("invalid message fingerprint")));
+  assert.ok(errors.some(error => error.includes("unique Thunderbird message ids")));
   assert.ok(errors.includes("session account does not match"));
   assert.ok(errors.includes("session config revision does not match"));
   assert.ok(errors.includes("session request does not match"));
@@ -206,22 +202,17 @@ test("merge validation rejects inconsistent scan accounting", () => {
   );
 });
 
-test("planner count deltas merge into resumable session progress", () => {
+test("planner message-id deltas merge into resumable session progress", () => {
   const first = message(1);
   const duplicate = {...first, id: 999};
   const other = message(2);
-  const firstFingerprint = messageFingerprint(first);
-  const otherFingerprint = messageFingerprint(other);
   const plan = {
     id: "plan-1",
     scanned: 3,
     scanComplete: false,
     stopReason: "action-limit",
     rowsSampled: true,
-    bulkExaminedCounts: {
-      [firstFingerprint]: 2,
-      [otherFingerprint]: 1
-    },
+    bulkExaminedMessageIds: [first.id, duplicate.id, other.id],
     summary: {
       total: 3,
       actionable: 1,
@@ -233,8 +224,7 @@ test("planner count deltas merge into resumable session progress", () => {
   };
 
   const merged = mergeBulkBatch(session(), plan, "2026-08-12T20:05:00.000Z");
-  assert.equal(merged.recordedOccurrences[firstFingerprint], 2);
-  assert.equal(merged.recordedOccurrences[otherFingerprint], 1);
+  assert.deepEqual(merged.recordedMessageIds, [1, 999, 2]);
   assert.equal(merged.totals.batches, 1);
   assert.equal(merged.totals.examined, 3);
   assert.equal(merged.exhausted, false);
@@ -247,30 +237,28 @@ test("planner count deltas merge into resumable session progress", () => {
     stopReason: "action-limit",
     rowsSampled: true
   });
-  assert.equal("recordedOccurrences" in publicBulkProgress(merged, plan), false);
+  assert.equal("recordedMessageIds" in publicBulkProgress(merged, plan), false);
 
-  // The planner's count map is a progress hint: it does not retain either the
-  // Thunderbird id or the move-shaped fields from the source messages.
-  assert.equal(JSON.stringify(merged).includes(String(duplicate.id)), false);
+  // The planner's ids are progress hints scoped to storage.session; the
+  // session retains no destination or other move-shaped authority.
   assert.equal("items" in merged, false);
 });
 
-test("planner batches accumulate 4,000 occurrence hints and replay idempotently", () => {
+test("planner batches accumulate 4,000 message ids and replay idempotently", () => {
   let state = session();
   let finalPlan;
   for (let batch = 0; batch < 20; batch += 1) {
-    const bulkExaminedCounts = {};
-    for (let offset = 0; offset < 200; offset += 1) {
-      const id = batch * 200 + offset + 1;
-      bulkExaminedCounts[messageFingerprint(message(id))] = 1;
-    }
+    const bulkExaminedMessageIds = Array.from(
+      {length: 200},
+      (_, offset) => batch * 200 + offset + 1
+    );
     finalPlan = {
       id: `plan-${batch + 1}`,
       scanned: 200,
       scanComplete: batch === 19,
       stopReason: batch === 19 ? null : "action-limit",
       rowsSampled: false,
-      bulkExaminedCounts,
+      bulkExaminedMessageIds,
       summary: {
         total: 200,
         actionable: 200,
@@ -283,11 +271,7 @@ test("planner batches accumulate 4,000 occurrence hints and replay idempotently"
     state = mergeBulkBatch(state, finalPlan, "2026-08-12T20:05:00.000Z");
   }
 
-  assert.equal(Object.keys(state.recordedOccurrences).length, 4_000);
-  assert.equal(
-    Object.values(state.recordedOccurrences).reduce((total, count) => total + count, 0),
-    4_000
-  );
+  assert.equal(state.recordedMessageIds.length, 4_000);
   assert.equal(state.totals.examined, 4_000);
   assert.equal(state.totals.batches, 20);
   assert.equal(state.exhausted, true);
@@ -298,12 +282,11 @@ test("planner batches accumulate 4,000 occurrence hints and replay idempotently"
 });
 
 test("planner delta validation fails closed on malformed accounting", () => {
-  const fingerprint = messageFingerprint(message(1));
   const plan = {
     id: "plan-1",
     scanned: 1,
     scanComplete: false,
-    bulkExaminedCounts: {[fingerprint]: 2},
+    bulkExaminedMessageIds: [1, 2],
     summary: {total: 1}
   };
 
@@ -317,6 +300,35 @@ test("planner delta validation fails closed on malformed accounting", () => {
     }, CREATED_AT),
     /scanComplete must be a boolean/u
   );
+});
+
+test("legacy fingerprint sessions restart conservatively during migration", () => {
+  const legacy = {
+    ...session(),
+    schemaVersion: 1,
+    recordedOccurrences: {["a".repeat(32)]: 25},
+    committedPlanIds: ["legacy-plan"],
+    totals: {
+      batches: 1,
+      examined: 25,
+      skippedRecorded: 0,
+      presented: 25,
+      total: 25,
+      actionable: 25,
+      matched: 25,
+      ambiguous: 0,
+      unmatched: 0,
+      skipped: 0
+    }
+  };
+  delete legacy.recordedMessageIds;
+
+  const migration = migrateBulkReviewSession(legacy);
+  assert.equal(migration.migrated, true);
+  assert.deepEqual(migration.session.recordedMessageIds, []);
+  assert.deepEqual(migration.session.committedPlanIds, []);
+  assert.equal(migration.session.exhausted, false);
+  assert.deepEqual(validateBulkReviewSession(migration.session), []);
 });
 
 test("persisted-state validation reports hostile timestamp types without throwing", () => {

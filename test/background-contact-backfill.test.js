@@ -262,7 +262,7 @@ test("background backfill command aggregates results, reports progress, and isol
     [byId.ready.attempted, byId.ready.created, byId.ready.existing, byId.ready.failed],
     [2, 1, 1, 0]
   );
-  assert.match(byId["root-unready"].errors[0], /root is not approved/iu);
+  assert.match(byId["root-unready"].errors[0], /domain root has not been set up/iu);
   assert.match(byId["book-unready"].errors[0], /address book has not been set up/iu);
   assert.equal(byId["scan-failure"].skippedFolders.length, 1);
   assert.match(

@@ -495,7 +495,7 @@ test("a contact-capture failure never retries or reverses a successful move", as
   assert.match(lastRuns[0].error, /Contact capture failed: address book unavailable/u);
 });
 
-test("automatic filing refuses to create an unapproved customer root", async () => {
+test("automatic filing refuses to create an unverified domain root", async () => {
   const inbox = {id: "inbox", accountId: "work", name: "Inbox", specialUse: ["inbox"]};
   const config = baseConfig({account: {customerRootReady: false}});
   let buildCalls = 0;
@@ -525,7 +525,7 @@ test("automatic filing refuses to create an unapproved customer root", async () 
   assert.equal(lastRuns[0].accountName, "Work");
   assert.equal(lastRuns[0].attempted, 1);
   assert.equal(lastRuns[0].failed, 1);
-  assert.match(lastRuns[0].error, /set up folders/u);
+  assert.match(lastRuns[0].error, /Save & set up/u);
 });
 
 test("automatic filing journals a move before invocation and retains uncertainty for review", async () => {
@@ -555,6 +555,34 @@ test("automatic filing journals a move before invocation and retains uncertainty
   const [attempt] = Object.values(suppressions);
   assert.equal(attempt.state, "review");
   assert.match(attempt.reason, /not confirmed/u);
+});
+
+test("an accepted but unconfirmed move does not create contacts", async () => {
+  const box = mailbox({destinationExists: true, messageCount: 1});
+  const suppressions = {};
+  let captureCalls = 0;
+  const {filer} = automaticFiler({
+    api: box.api,
+    config: box.config,
+    mutateSuppressions: async mutator => mutator(suppressions),
+    confirmMove: async (_descriptor, operation) => {
+      await operation();
+      return {status: "accepted"};
+    },
+    captureContacts: async () => {
+      captureCalls += 1;
+      return {attempted: 1, created: 1, existing: 0, failed: 0};
+    }
+  });
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.equal(result.completed, 1);
+  assert.equal(result.results[0].moveConfirmationStatus, "accepted");
+  assert.equal(captureCalls, 0);
+  const [attempt] = Object.values(suppressions);
+  assert.equal(attempt.state, "review");
+  assert.match(attempt.reason, /reconciliation has not confirmed removal/u);
 });
 
 test("automatic filing routes an explicitly configured sister-company domain", async () => {

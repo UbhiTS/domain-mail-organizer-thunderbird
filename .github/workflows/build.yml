@@ -13,14 +13,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -30,6 +36,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Check version consistency
+        run: npm run check:versions
 
       - name: Check syntax
         run: npm run check:syntax
@@ -43,18 +55,29 @@ jobs:
       - name: Build extension archives
         run: npm run build
 
-      - name: Create SHA-256 checksums
+      - name: Resolve artifact names
+        id: artifact
         shell: bash
         run: |
-          cd artifacts
-          sha256sum *.xpi *.zip > SHA256SUMS.txt
+          version=$(node -p 'require("./package.json").version')
+          echo "basename=domain-mail-organizer-${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create SHA-256 checksums
+        shell: bash
+        working-directory: artifacts
+        run: |
+          sha256sum \
+            "${{ steps.artifact.outputs.basename }}.xpi" \
+            "${{ steps.artifact.outputs.basename }}.zip" \
+            > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: domain-mail-organizer-${{ github.sha }}
           path: |
-            artifacts/*.xpi
-            artifacts/*.zip
+            artifacts/${{ steps.artifact.outputs.basename }}.xpi
+            artifacts/${{ steps.artifact.outputs.basename }}.zip
             artifacts/SHA256SUMS.txt
           if-no-files-found: error

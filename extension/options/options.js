@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 import {isRegistrableDomain, normalizeDomain, normalizeEmail} from "../lib/rules.js";
 import {internalDomainsFromIdentities} from "../lib/contacts.js";
+import {assertSettingsImportFileSize} from "../lib/input-limits.js";
 import {customersByName} from "../lib/sort.js";
 
 const elements = {
@@ -17,7 +18,6 @@ const elements = {
   preserveFlagged: document.querySelector("#preserveFlagged"),
   addCustomer: document.querySelector("#addCustomer"),
   save: document.querySelector("#save"),
-  setupFolders: document.querySelector("#setupFolders"),
   buildAddressBooks: document.querySelector("#buildAddressBooks"),
   mailAccountsPanel: document.querySelector("#mailAccountsPanel"),
   manualToolsPanel: document.querySelector("#manualToolsPanel"),
@@ -28,20 +28,11 @@ const elements = {
   recoverArchive: document.querySelector("#recoverArchive"),
   export: document.querySelector("#export"),
   import: document.querySelector("#import"),
-  importFile: document.querySelector("#importFile"),
-  folderImportDialog: document.querySelector("#folderImportDialog"),
-  folderImportDescription: document.querySelector("#folderImportDescription"),
-  folderImportStatus: document.querySelector("#folderImportStatus"),
-  folderImportList: document.querySelector("#folderImportList"),
-  folderImportTemplate: document.querySelector("#folderImportTemplate"),
-  cancelFolderImportTop: document.querySelector("#cancelFolderImportTop"),
-  cancelFolderImport: document.querySelector("#cancelFolderImport"),
-  addFolderImports: document.querySelector("#addFolderImports")
+  importFile: document.querySelector("#importFile")
 };
 
 let bootstrap;
 let config;
-let folderImportContext = null;
 let contactBackfillRunning = false;
 let contactBackfillProgress = null;
 
@@ -227,12 +218,14 @@ function renderContactBackfillResult(result = {}) {
 
 function accountConfig(accountId) {
   return config.accounts[accountId] ?? {
+    initialized: false,
     enabled: false,
-    rootFolderName: "Customers",
+    rootFolderName: "Domains",
     customerRootReady: false,
-    archiveFolderName: "Organizer Archive",
+    archiveFolderName: "Archive",
     archiveReady: false,
     autoFileIncoming: false,
+    autoFileRequested: true,
     autoFileSince: null,
     internalContactDomains: []
   };
@@ -245,12 +238,15 @@ function internalDomainLabels(domains) {
 function renderInternalContactSetting(card, account, value) {
   const help = card.querySelector(".internal-contacts-help");
   const options = card.querySelector(".internal-domain-options");
+  const master = card.querySelector(".capture-internal");
   const detected = internalDomainsFromIdentities(account.identities);
   const saved = value.internalContactDomains ?? [];
   const savedSet = new Set(saved);
   options.replaceChildren();
 
   if (!detected.length) {
+    master.checked = false;
+    master.disabled = true;
     help.textContent = saved.length
       ? `Saved approval for ${internalDomainLabels(saved)} is paused because no current Thunderbird identity verifies it. Add or restore the identity, then save again.`
       : "No eligible domain was found in this account's identities, so internal capture cannot be enabled.";
@@ -269,7 +265,7 @@ function renderInternalContactSetting(card, account, value) {
     checkbox.className = "capture-internal-domain";
     checkbox.type = "checkbox";
     checkbox.value = domain;
-    checkbox.checked = savedSet.has(domain);
+    checkbox.checked = !value.initialized || savedSet.has(domain);
     const text = document.createElement("span");
     text.textContent = `@${domain}`;
     label.append(checkbox, text);
@@ -280,6 +276,19 @@ function renderInternalContactSetting(card, account, value) {
       label.append(caution);
     }
   }
+  const domainCheckboxes = [...options.querySelectorAll(".capture-internal-domain")];
+  const syncMaster = () => {
+    const selected = domainCheckboxes.filter(checkbox => checkbox.checked).length;
+    master.checked = selected === domainCheckboxes.length;
+    master.indeterminate = selected > 0 && selected < domainCheckboxes.length;
+  };
+  master.disabled = false;
+  master.addEventListener("change", () => {
+    for (const checkbox of domainCheckboxes) checkbox.checked = master.checked;
+    master.indeterminate = false;
+  });
+  for (const checkbox of domainCheckboxes) checkbox.addEventListener("change", syncMaster);
+  syncMaster();
 }
 
 function updateManualToolsReadiness() {
@@ -317,216 +326,8 @@ function renderManualTools() {
   updateManualToolsReadiness();
 }
 
-function renderFolderApproval(card, kind, ready) {
-  const approval = card.querySelector(`.adopt-${kind}`);
-  const row = card.querySelector(`.${kind}-approval`);
-  const title = card.querySelector(`.${kind}-approval-title`);
-  const help = card.querySelector(`.${kind}-approval-help`);
-  const isRoot = kind === "root";
-  approval.checked = false;
-  approval.disabled = ready;
-  row.classList.toggle("ready", ready);
-  title.textContent = ready
-    ? "Folder already approved"
-    : "Use an existing folder with this name";
-  help.textContent = ready
-    ? isRoot
-      ? "This is the approved customer root for this account."
-      : "This is the approved organizer archive for this account."
-    : isRoot
-      ? "One-time approval: its direct customer subfolders may receive organized mail. Existing messages are not changed during setup."
-      : "One-time approval: future archive actions may move messages here. Setup changes nothing already inside; recovery will treat its current contents as organizer archive mail.";
-}
-
-function normalizedFolderKey(value) {
-  return value.trim().normalize("NFC").toLocaleLowerCase();
-}
-
 function matchesSavedFolderName(value, savedName) {
   return value.trim().normalize("NFC") === savedName;
-}
-
-function customerCardUsesAccount(card, accountId) {
-  const selected = [...card.querySelectorAll('.scope-options input[type="checkbox"]:checked')]
-    .map(input => input.value);
-  return !selected.length || selected.includes(accountId);
-}
-
-function hasCustomerFolderRule(accountId, folderName) {
-  const key = normalizedFolderKey(folderName);
-  return [...elements.customers.querySelectorAll(".customer-card")].some(card =>
-    normalizedFolderKey(card.querySelector(".customer-folder").value) === key &&
-    customerCardUsesAccount(card, accountId)
-  );
-}
-
-function normalizeFolderProposal(value) {
-  const source = typeof value === "string" ? {folderName: value} : (value ?? {});
-  const folderName = String(source.folderName ?? source.name ?? "").trim().normalize("NFC");
-  const domainFromFolderName = normalizeDomain(folderName);
-  const domains = Array.isArray(source.domains)
-    ? source.domains
-    : isRegistrableDomain(domainFromFolderName)
-      ? [domainFromFolderName]
-      : [];
-  return {
-    folderName,
-    name: String(source.customerName ?? source.name ?? folderName).trim(),
-    domains,
-    addresses: Array.isArray(source.addresses) ? source.addresses : [],
-    keywords: Array.isArray(source.keywords) ? source.keywords : [],
-    enabled: source.enabled !== false,
-    needsReview: Boolean(source.needsReview),
-    warning: typeof source.warning === "string" ? source.warning : "",
-    conflictingDomain: normalizeDomain(source.conflictingDomain) || null
-  };
-}
-
-function showFolderImportStatus(message = "") {
-  elements.folderImportStatus.textContent = message;
-  elements.folderImportStatus.classList.toggle("hidden", !message);
-}
-
-function renderFolderImport(account, rootFolderName, proposals) {
-  folderImportContext = {accountId: account.id, accountName: account.name, rootFolderName};
-  elements.folderImportDescription.textContent = `${account.name} / ${rootFolderName}`;
-  elements.folderImportList.replaceChildren();
-  showFolderImportStatus();
-
-  const usable = proposals
-    .map(normalizeFolderProposal)
-    .filter(proposal => proposal.folderName)
-    .sort((left, right) => left.folderName.localeCompare(right.folderName, undefined, {
-      sensitivity: "base",
-      numeric: true
-    }));
-
-  for (const proposal of usable) {
-    const row = elements.folderImportTemplate.content.firstElementChild.cloneNode(true);
-    row._proposal = proposal;
-    const duplicate = hasCustomerFolderRule(account.id, proposal.folderName);
-    const checkbox = row.querySelector(".folder-import-enabled");
-    checkbox.checked = !duplicate;
-    checkbox.disabled = duplicate;
-    row.classList.toggle("unavailable", duplicate);
-    row.querySelector(".folder-import-name").textContent = proposal.folderName;
-    row.querySelector(".folder-import-state").textContent = duplicate
-      ? "Already assigned to a customer rule for this account"
-      : proposal.warning
-        ? `${proposal.warning} It will be imported disabled unless you enter ${proposal.conflictingDomain ? "a different" : "a"} valid domain.`
-        : proposal.domains.length || proposal.addresses.length || proposal.keywords.length
-          ? "Review the proposed matching rule before adding"
-          : "No domain was inferred. It will be imported as a disabled draft for you to complete.";
-    row.querySelector(".folder-import-customer-name").value = proposal.name;
-    row.querySelector(".folder-import-domains").value = proposal.domains.join(", ");
-    elements.folderImportList.append(row);
-  }
-
-  if (!usable.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No direct customer folders were found in this root.";
-    elements.folderImportList.append(empty);
-  }
-  elements.addFolderImports.disabled = !usable.some(
-    proposal => !hasCustomerFolderRule(account.id, proposal.folderName)
-  );
-  elements.folderImportDialog.showModal();
-}
-
-async function discoverCustomerFolders(card) {
-  const accountId = card.dataset.accountId;
-  const account = bootstrap.accounts.find(candidate => candidate.id === accountId);
-  const rootFolderName = card.querySelector(".root-folder").value.trim().normalize("NFC");
-  if (!rootFolderName) {
-    showStatus("Enter a customer root folder name before importing its folders.", true);
-    return;
-  }
-  setBusy(true);
-  let result;
-  try {
-    result = await send("discoverExistingFolders", {accountId, rootFolderName});
-  } catch (error) {
-    showStatus(error.message, true);
-    return;
-  } finally {
-    setBusy(false);
-  }
-  const proposals = Array.isArray(result.proposedCustomers)
-    ? result.proposedCustomers
-    : Array.isArray(result.folders)
-      ? result.folders
-      : [];
-  renderFolderImport(account, result.rootFolderName ?? rootFolderName, proposals);
-}
-
-function closeFolderImport() {
-  if (elements.folderImportDialog.open) elements.folderImportDialog.close();
-  folderImportContext = null;
-  showFolderImportStatus();
-}
-
-function addSelectedFolderImports() {
-  if (!folderImportContext) return;
-  const additions = [];
-  const errors = [];
-  for (const row of elements.folderImportList.querySelectorAll(".folder-import-row")) {
-    row.classList.remove("invalid");
-    if (!row.querySelector(".folder-import-enabled").checked) continue;
-    const proposal = row._proposal;
-    const name = row.querySelector(".folder-import-customer-name").value.trim();
-    const rawDomains = splitList(row.querySelector(".folder-import-domains").value);
-    const invalidDomains = rawDomains.filter(
-      domain => !normalizeDomain(domain) || !isRegistrableDomain(domain)
-    );
-    const domains = rawDomains.map(normalizeDomain).filter(Boolean);
-    if (!name) {
-      errors.push(`${proposal.folderName}: enter a customer name.`);
-      row.classList.add("invalid");
-    }
-    if (invalidDomains.length) {
-      errors.push(`${proposal.folderName}: invalid organization domain ${invalidDomains.join(", ")}.`);
-      row.classList.add("invalid");
-    }
-    if (!name || invalidDomains.length) {
-      continue;
-    }
-    const hasMatcher = domains.length || proposal.addresses.length || proposal.keywords.length;
-    const retainsConflict = Boolean(
-      proposal.conflictingDomain && domains.includes(proposal.conflictingDomain)
-    );
-    const proposedDomains = proposal.domains.map(normalizeDomain).filter(Boolean);
-    const domainChanged = domains.length !== proposedDomains.length ||
-      domains.some(domain => !proposedDomains.includes(domain));
-    additions.push({
-      id: uid(),
-      enabled: Boolean(hasMatcher) && !retainsConflict && (proposal.enabled || domainChanged),
-      name,
-      folderName: proposal.folderName,
-      domains,
-      addresses: proposal.addresses,
-      keywords: proposal.keywords,
-      accountIds: [folderImportContext.accountId]
-    });
-  }
-  if (errors.length) {
-    showFolderImportStatus(errors.join("\n"));
-    return;
-  }
-  if (!additions.length) {
-    showFolderImportStatus("Select at least one folder to add.");
-    return;
-  }
-  for (const customer of customersByName(additions).reverse()) {
-    appendCustomer(customer, {prepend: true, expanded: !customer.enabled});
-  }
-  const disabledCount = additions.filter(customer => !customer.enabled).length;
-  const {accountName, rootFolderName} = folderImportContext;
-  closeFolderImport();
-  showStatus(
-    `${additions.length} existing folder${additions.length === 1 ? "" : "s"} from ${accountName} / ${rootFolderName} added as customer rules for review.${disabledCount ? ` ${disabledCount} ${disabledCount === 1 ? "needs" : "need"} a matching rule and remains disabled.` : ""} Review them, then save settings. No folders or messages were changed.`
-  );
-  elements.customers.scrollIntoView({behavior: "smooth", block: "start"});
 }
 
 function renderAccounts() {
@@ -542,41 +343,33 @@ function renderAccounts() {
     const archiveFolder = card.querySelector(".archive-folder");
     rootFolder.value = value.rootFolderName;
     archiveFolder.value = value.archiveFolderName;
-    card.querySelector(".import-customer-folders").addEventListener(
-      "click",
-      () => discoverCustomerFolders(card)
-    );
     const autoFile = card.querySelector(".auto-file");
     renderInternalContactSetting(card, account, value);
     const contactsReady = Boolean(
       bootstrap.managedContactBooks?.[account.id]?.addressBookId &&
       !bootstrap.managedContactBookErrors?.[account.id]
     );
-    autoFile.checked = value.autoFileIncoming && value.customerRootReady && contactsReady;
+    autoFile.checked = value.autoFileRequested !== false;
     const autoHelp = card.querySelector(".auto-file-help");
     const updateRootState = () => {
       const rootReady = value.customerRootReady &&
         matchesSavedFolderName(rootFolder.value, value.rootFolderName);
-      const automationReady = rootReady && contactsReady;
-      renderFolderApproval(card, "root", rootReady);
-      autoFile.disabled = !automationReady;
-      if (!automationReady) autoFile.checked = false;
-      autoHelp.textContent = automationReady
-        ? "Sender/recipient rules only. After each matched move, customer contacts and any approved internal coworkers are added to the address book. A successful manual preview is recommended first."
+      const automationReady = Boolean(
+        value.enabled && value.autoFileIncoming && rootReady && contactsReady
+      );
+      autoHelp.textContent = !autoFile.checked
+        ? "Automatic Inbox filing and automatic contact capture are off for this account."
+        : automationReady
+          ? "Sender/recipient rules only. After Thunderbird confirms each destination move, customer contacts and any selected internal coworkers are added to the address book. A successful manual preview is recommended first."
         : rootReady
           ? bootstrap.managedContactBookErrors?.[account.id] ||
-            "Run Save & set up folders to create the managed customer address book."
-          : "Run Save & set up folders before automatic filing and contact capture can be enabled.";
-    };
-    const updateArchiveState = () => {
-      const ready = value.archiveReady &&
-        matchesSavedFolderName(archiveFolder.value, value.archiveFolderName);
-      renderFolderApproval(card, "archive", ready);
+            "Your preference is saved; choose Save & set up to create the managed customer address book and activate it."
+          : "Your preference is saved; choose Save & set up to reuse or create the folders and activate it.";
     };
     rootFolder.addEventListener("input", updateRootState);
-    archiveFolder.addEventListener("input", updateArchiveState);
+    autoFile.addEventListener("change", updateRootState);
+    card.querySelector(".account-enabled").addEventListener("change", updateRootState);
     updateRootState();
-    updateArchiveState();
     elements.accounts.append(card);
   }
 }
@@ -704,9 +497,11 @@ function collectConfig() {
       ...card.querySelectorAll(".capture-internal-domain:checked")
     ].map(input => input.value);
     next.accounts[card.dataset.accountId] = {
+      initialized: true,
       enabled: card.querySelector(".account-enabled").checked,
       rootFolderName: card.querySelector(".root-folder").value,
       archiveFolderName: card.querySelector(".archive-folder").value,
+      autoFileRequested: card.querySelector(".auto-file").checked,
       autoFileIncoming: card.querySelector(".auto-file").checked,
       internalContactDomains
     };
@@ -724,22 +519,6 @@ function collectConfig() {
   return next;
 }
 
-function collectFolderApprovals() {
-  const folderApprovals = {};
-  for (const card of elements.accounts.querySelectorAll(".account-card")) {
-    const adoptExistingRoot = card.querySelector(".adopt-root").checked;
-    const adoptExistingArchive = card.querySelector(".adopt-archive").checked;
-    if (!adoptExistingRoot && !adoptExistingArchive) continue;
-    folderApprovals[card.dataset.accountId] = {
-      rootFolderName: card.querySelector(".root-folder").value.trim().normalize("NFC"),
-      archiveFolderName: card.querySelector(".archive-folder").value.trim().normalize("NFC"),
-      adoptExistingRoot,
-      adoptExistingArchive
-    };
-  }
-  return folderApprovals;
-}
-
 async function saveSettings(quiet = false) {
   setBusy(true);
   try {
@@ -750,19 +529,41 @@ async function saveSettings(quiet = false) {
     }
     const response = await send("saveConfig", {config: raw});
     config = response.config;
-    renderAccounts();
-    renderManualTools();
+    const setup = await send("setupFolders");
+    config = setup.config;
+    bootstrap.managedContactBooks = setup.managedContactBooks;
+    bootstrap.managedContactBookErrors ??= {};
+    for (const contactBook of setup.result.contactBooks ?? []) {
+      delete bootstrap.managedContactBookErrors[contactBook.accountId];
+    }
+    render();
+    const setupErrors = setup.result.errors ?? [];
+    if (quiet && setupErrors.length) {
+      showStatus(
+        `Settings were saved, but setup needs attention:\n${setupErrors.join("\n")}`,
+        true
+      );
+    }
     if (!quiet) {
       const automaticAccounts = Object.values(config.accounts).filter(
         account => account.enabled && account.autoFileIncoming
       ).length;
+      const pendingAutomaticAccounts = Object.values(config.accounts).filter(
+        account => account.enabled && account.autoFileRequested && !account.autoFileIncoming
+      ).length;
+      const imported = setup.result.importedCustomers?.length ?? 0;
+      const setupSummary = `${setup.result.folders.length} mail destination${setup.result.folders.length === 1 ? "" : "s"} verified; ${imported} customer rule${imported === 1 ? "" : "s"} imported.`;
+      const automaticSummary = automaticAccounts
+        ? ` Automatic Inbox filing is active for ${automaticAccounts} account${automaticAccounts === 1 ? "" : "s"}.`
+        : pendingAutomaticAccounts
+          ? ` Automatic filing remains selected for ${pendingAutomaticAccounts} account${pendingAutomaticAccounts === 1 ? "" : "s"}, but setup needs attention.`
+          : " Automatic filing is off.";
       showStatus(
-        automaticAccounts
-          ? `Settings saved. Automatic Inbox filing is active for ${automaticAccounts} account${automaticAccounts === 1 ? "" : "s"}.`
-          : "Settings saved. Use Process Inbox in the toolbar popup or the processing tools here for manual review."
+        `Settings saved and setup completed. ${setupSummary}${automaticSummary}${setupErrors.length ? `\n${setupErrors.join("\n")}` : ""}`,
+        setupErrors.length > 0
       );
     }
-    return true;
+    return setupErrors.length === 0;
   } catch (error) {
     showStatus(error.message, true);
     return false;
@@ -773,13 +574,6 @@ async function saveSettings(quiet = false) {
 
 elements.addCustomer.addEventListener("click", () => {
   appendCustomer({}, {prepend: true, expanded: true, focus: true});
-});
-elements.cancelFolderImportTop.addEventListener("click", closeFolderImport);
-elements.cancelFolderImport.addEventListener("click", closeFolderImport);
-elements.addFolderImports.addEventListener("click", addSelectedFolderImports);
-elements.folderImportDialog.addEventListener("close", () => {
-  folderImportContext = null;
-  showFolderImportStatus();
 });
 elements.save.addEventListener("click", () => saveSettings());
 elements.manualAccount.addEventListener("change", updateManualToolsReadiness);
@@ -800,7 +594,7 @@ elements.processEntireInbox.addEventListener("click", async () => {
 elements.recoverArchive.addEventListener("click", async () => {
   setBusy(true);
   elements.manualToolsPanel.setAttribute("aria-busy", "true");
-  showProgress("Building a read-only Organizer Archive recovery review…");
+  showProgress("Building a read-only Archive recovery review…");
   try {
     await send("createAndOpenPlan", {
       request: {
@@ -810,7 +604,7 @@ elements.recoverArchive.addEventListener("click", async () => {
         days: Number(elements.manualDays.value)
       }
     });
-    showStatus("The Organizer Archive recovery review is open in a new tab.");
+    showStatus("The Archive recovery review is open in a new tab.");
   } catch (error) {
     showStatus(error.message, true);
   } finally {
@@ -846,36 +640,6 @@ elements.buildAddressBooks.addEventListener("click", async () => {
     setBusy(false);
   }
 });
-elements.setupFolders.addEventListener("click", async () => {
-  // Approvals are intentionally one-use and are captured before saveSettings
-  // rerenders the account cards. They never become durable configuration.
-  const folderApprovals = collectFolderApprovals();
-  if (!(await saveSettings(true))) return;
-  setBusy(true);
-  try {
-    const result = await send("setupFolders", {folderApprovals});
-    config = result.config;
-    bootstrap.managedContactBooks = result.managedContactBooks;
-    bootstrap.managedContactBookErrors ??= {};
-    for (const contactBook of result.result.contactBooks ?? []) {
-      delete bootstrap.managedContactBookErrors[contactBook.accountId];
-    }
-    renderAccounts();
-    renderManualTools();
-    const details = result.result.errors.length
-      ? `\n${result.result.errors.join("\n")}`
-      : "";
-    const contactBookCount = result.result.contactBooks?.length ?? 0;
-    showStatus(
-      `${result.result.folders.length} organizer folder destination${result.result.folders.length === 1 ? "" : "s"} and ${contactBookCount} managed contact book${contactBookCount === 1 ? "" : "s"} ready.${details}`,
-      result.result.errors.length > 0
-    );
-  } catch (error) {
-    showStatus(error.message, true);
-  } finally {
-    setBusy(false);
-  }
-});
 
 messenger.runtime.onMessage.addListener(message => {
   if (!message?.dmo || message.event !== "contactBackfillProgress") return;
@@ -899,6 +663,7 @@ elements.importFile.addEventListener("change", async () => {
   const [file] = elements.importFile.files;
   if (!file) return;
   try {
+    assertSettingsImportFileSize(file);
     const imported = JSON.parse(await file.text());
     const rawErrors = validateRawConfig(imported);
     if (rawErrors.length) {
@@ -907,7 +672,7 @@ elements.importFile.addEventListener("change", async () => {
     const prepared = await send("prepareConfig", {config: imported});
     config = prepared.config;
     render();
-    showStatus("Imported settings are shown below. Review them, then choose Save settings.");
+    showStatus("Imported settings are shown below. Review them, then choose Save & set up.");
   } catch (error) {
     showStatus(`Could not import JSON: ${error.message}`, true);
   } finally {

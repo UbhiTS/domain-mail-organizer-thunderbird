@@ -1,8 +1,6 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
-import {messageFingerprint} from "./fingerprint.js";
-
-export const BULK_REVIEW_SCHEMA_VERSION = 1;
+export const BULK_REVIEW_SCHEMA_VERSION = 2;
 
 const SUMMARY_FIELDS = Object.freeze([
   "total",
@@ -72,33 +70,29 @@ function timestamp(value, label) {
   return new Date(value).toISOString();
 }
 
-function validateCountMap(value, label = "recordedOccurrences") {
-  if (!isPlainObject(value)) {
+function messageId(value, label = "message.id") {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
+function messageIdFrom(value, label = "message") {
+  if (!value || typeof value !== "object") {
     throw new TypeError(`${label} must be an object`);
   }
-  const counts = {};
-  for (const [fingerprint, count] of Object.entries(value)) {
-    if (!/^[a-f0-9]{32}$/u.test(fingerprint)) {
-      throw new TypeError(`${label} contains an invalid message fingerprint`);
-    }
-    if (!Number.isSafeInteger(count) || count <= 0) {
-      throw new TypeError(`${label}.${fingerprint} must be a positive safe integer`);
-    }
-    counts[fingerprint] = count;
-  }
-  return counts;
+  return messageId(value.messageId ?? value.id, `${label}.messageId`);
 }
 
-function countOccurrences(counts) {
-  return Object.values(counts).reduce((total, count) => total + count, 0);
-}
-
-function addSafeCounts(left, right, label) {
-  const total = left + right;
-  if (!Number.isSafeInteger(total) || total < 0) {
-    throw new TypeError(`${label} exceeds the safe integer range`);
+function validateMessageIdList(value, label = "recordedMessageIds") {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array`);
   }
-  return total;
+  const ids = value.map((id, index) => messageId(id, `${label}[${index}]`));
+  if (new Set(ids).size !== ids.length) {
+    throw new TypeError(`${label} must contain unique Thunderbird message ids`);
+  }
+  return ids;
 }
 
 function initialTotals() {
@@ -121,15 +115,16 @@ function cloneSession(session) {
   return {
     ...session,
     request: canonicalJsonValue(session.request),
-    recordedOccurrences: {...session.recordedOccurrences},
+    recordedMessageIds: [...session.recordedMessageIds],
     committedPlanIds: [...session.committedPlanIds],
     totals: {...session.totals}
   };
 }
 
 /**
- * Create serializable bulk-review bookkeeping. The recorded fingerprints are
- * progress hints only. They are never sufficient authority to move a message.
+ * Create serializable bulk-review bookkeeping. Thunderbird message ids are
+ * valid only for the current extension session and are progress hints only.
+ * They are never sufficient authority to move a message.
  */
 export function createBulkReviewSession({
   id,
@@ -159,7 +154,7 @@ export function createBulkReviewSession({
     request: normalizedRequest,
     createdAt: normalizedCreatedAt,
     updatedAt: normalizedCreatedAt,
-    recordedOccurrences: {},
+    recordedMessageIds: [],
     committedPlanIds: [],
     totals: initialTotals(),
     exhausted: false
@@ -167,57 +162,76 @@ export function createBulkReviewSession({
 }
 
 /**
- * Return a new occurrence-count map with the supplied messages recorded. The
- * caller decides when a message has actually been reviewed; this helper stores
- * no Thunderbird message id and performs no mailbox action.
+ * Upgrade the fingerprint-based v1 bookkeeping conservatively. Fingerprint
+ * counts cannot be mapped back to exact message ids after reviewed duplicates
+ * have moved, so carrying them forward could skip unseen mail. A valid v1
+ * session therefore restarts its read-only scan with the same ownership and
+ * request. Messages already moved are no longer in Inbox; remaining messages
+ * can safely be presented again.
  */
-export function recordFingerprintOccurrences(recordedOccurrences = {}, messages) {
-  const counts = validateCountMap(recordedOccurrences);
-  if (!messages || typeof messages[Symbol.iterator] !== "function") {
-    throw new TypeError("messages must be iterable");
+export function migrateBulkReviewSession(value) {
+  if (!isPlainObject(value) || value.schemaVersion !== 1) {
+    return {session: value, migrated: false};
   }
-  for (const message of messages) {
-    if (!message || typeof message !== "object") {
-      throw new TypeError("each message must be an object");
-    }
-    const fingerprint = messageFingerprint(message);
-    counts[fingerprint] = addSafeCounts(
-      counts[fingerprint] ?? 0,
-      1,
-      `recordedOccurrences.${fingerprint}`
-    );
-  }
-  return counts;
+  const session = createBulkReviewSession({
+    id: value.id,
+    accountId: value.accountId,
+    configRevision: value.configRevision,
+    request: value.request,
+    createdAt: value.createdAt
+  });
+  return {session, migrated: true};
 }
 
 /**
- * Create a consuming multiset matcher for a fresh Inbox scan. If N occurrences
- * were previously recorded, exactly the first N matching occurrences are
- * skipped; an additional identical occurrence remains eligible for review.
+ * Return a new id list with the supplied messages recorded. The caller decides
+ * when a message has actually been reviewed; this helper performs no mailbox
+ * action and rejects duplicate ids rather than silently losing scan progress.
  */
-export function createFingerprintSkipper(recordedOccurrences = {}) {
-  const remaining = validateCountMap(recordedOccurrences);
-  const claimedOccurrences = {};
+export function recordMessageIds(recordedMessageIds = [], messages) {
+  const ids = validateMessageIdList(recordedMessageIds);
+  if (!messages || typeof messages[Symbol.iterator] !== "function") {
+    throw new TypeError("messages must be iterable");
+  }
+  const seen = new Set(ids);
+  let index = 0;
+  for (const value of messages) {
+    const id = messageIdFrom(value, `messages[${index}]`);
+    if (seen.has(id)) {
+      throw new TypeError(`messages[${index}] repeats Thunderbird message id ${id}`);
+    }
+    seen.add(id);
+    ids.push(id);
+    index += 1;
+  }
+  return ids;
+}
+
+/**
+ * Create a matcher for a fresh Inbox scan. Only the exact session-scoped
+ * Thunderbird ids recorded earlier are skipped, so an otherwise identical
+ * message remains eligible after its duplicate was moved out of the Inbox.
+ */
+export function createMessageIdSkipper(recordedMessageIds = []) {
+  const recorded = new Set(validateMessageIdList(recordedMessageIds));
+  const remaining = new Set(recorded);
+  const claimed = new Set();
   let skippedCount = 0;
 
   return {
-    shouldSkip(message) {
-      if (!message || typeof message !== "object") {
-        throw new TypeError("message must be an object");
-      }
-      const fingerprint = messageFingerprint(message);
-      if (!remaining[fingerprint]) return false;
-      remaining[fingerprint] -= 1;
-      if (!remaining[fingerprint]) delete remaining[fingerprint];
-      claimedOccurrences[fingerprint] = (claimedOccurrences[fingerprint] ?? 0) + 1;
+    shouldSkip(value) {
+      const id = messageIdFrom(value);
+      if (!recorded.has(id)) return false;
+      remaining.delete(id);
+      claimed.add(id);
       skippedCount += 1;
       return true;
     },
     progress() {
       return {
         skippedCount,
-        claimedOccurrences: {...claimedOccurrences},
-        remainingOccurrences: {...remaining}
+        claimedMessageIds: [...claimed],
+        remainingMessageIds: [...remaining]
       };
     }
   };
@@ -225,8 +239,8 @@ export function createFingerprintSkipper(recordedOccurrences = {}) {
 
 /**
  * Commit one deliberately reviewed plan batch into a session. `messages` must
- * contain only occurrences the caller intends to advance past. A duplicate
- * plan id is idempotent. No message id, destination, or action is retained.
+ * contain only messages the caller intends to advance past. A duplicate plan
+ * id is idempotent. No destination or action authority is retained.
  */
 export function mergePlanScanDelta(session, {
   planId,
@@ -269,10 +283,7 @@ export function mergePlanScanDelta(session, {
   }
 
   const next = cloneSession(session);
-  next.recordedOccurrences = recordFingerprintOccurrences(
-    next.recordedOccurrences,
-    messages
-  );
+  next.recordedMessageIds = recordMessageIds(next.recordedMessageIds, messages);
   next.committedPlanIds.push(normalizedPlanId);
   next.totals.batches += 1;
   next.totals.examined += normalizedExamined;
@@ -286,7 +297,7 @@ export function mergePlanScanDelta(session, {
   return next;
 }
 
-/** Return progress suitable for UI/runtime responses without fingerprint data. */
+/** Return progress suitable for UI/runtime responses without private id data. */
 export function publicBulkReviewProgress(session) {
   const errors = validateBulkReviewSession(session);
   if (errors.length) {
@@ -298,7 +309,7 @@ export function publicBulkReviewProgress(session) {
     configRevision: session.configRevision,
     batches: session.totals.batches,
     examined: session.totals.examined,
-    reviewed: countOccurrences(session.recordedOccurrences),
+    reviewed: session.recordedMessageIds.length,
     skippedPreviouslyReviewed: session.totals.skippedRecorded,
     presented: session.totals.presented,
     actionable: session.totals.actionable,
@@ -312,9 +323,9 @@ export function publicBulkReviewProgress(session) {
 }
 
 /**
- * Commit the compact fingerprint-count delta emitted by the Inbox planner.
- * This is the integration form used by the background page: it remembers all
- * examined occurrences, including diagnostics that were not retained as rows.
+ * Commit the exact session-scoped Thunderbird ids emitted by the Inbox
+ * planner. This remembers all examined messages, including diagnostics that
+ * were not retained as rows, without treating those ids as move authority.
  */
 export function mergeBulkBatch(session, plan, committedAt = new Date().toISOString()) {
   const errors = validateBulkReviewSession(session);
@@ -328,10 +339,13 @@ export function mergeBulkBatch(session, plan, committedAt = new Date().toISOStri
   if (session.exhausted) {
     throw new Error("Cannot merge another plan into an exhausted bulk-review session");
   }
-  const delta = validateCountMap(plan.bulkExaminedCounts ?? {}, "plan.bulkExaminedCounts");
+  const delta = validateMessageIdList(
+    plan.bulkExaminedMessageIds ?? [],
+    "plan.bulkExaminedMessageIds"
+  );
   const examined = nonNegativeInteger(plan.scanned ?? 0, "plan.scanned");
-  if (countOccurrences(delta) !== examined) {
-    throw new TypeError("plan.scanned must equal the bulk fingerprint occurrence delta");
+  if (delta.length !== examined) {
+    throw new TypeError("plan.scanned must equal the bulk Thunderbird message id delta");
   }
   const summary = normalizedSummary(plan.summary);
   if (summary.total !== examined) {
@@ -339,13 +353,10 @@ export function mergeBulkBatch(session, plan, committedAt = new Date().toISOStri
   }
   const normalizedCommittedAt = timestamp(committedAt, "committedAt");
   const next = cloneSession(session);
-  for (const [fingerprint, count] of Object.entries(delta)) {
-    next.recordedOccurrences[fingerprint] = addSafeCounts(
-      next.recordedOccurrences[fingerprint] ?? 0,
-      count,
-      `recordedOccurrences.${fingerprint}`
-    );
-  }
+  next.recordedMessageIds = recordMessageIds(
+    next.recordedMessageIds,
+    delta.map(id => ({messageId: id}))
+  );
   next.committedPlanIds.push(planId);
   next.totals.batches += 1;
   next.totals.examined += examined;
@@ -364,7 +375,7 @@ export function mergeBulkBatch(session, plan, committedAt = new Date().toISOStri
   return next;
 }
 
-/** Public metadata attached to an organizer plan; fingerprint state stays private. */
+/** Public metadata attached to an organizer plan; message-id state stays private. */
 export function publicBulkProgress(session, plan) {
   const progress = publicBulkReviewProgress(session);
   return {
@@ -432,9 +443,9 @@ export function validateBulkReviewSession(session, expected = {}) {
     errors.push("updatedAt cannot be earlier than createdAt");
   }
 
-  let recordedOccurrences = null;
+  let recordedMessageIds = null;
   try {
-    recordedOccurrences = validateCountMap(session.recordedOccurrences);
+    recordedMessageIds = validateMessageIdList(session.recordedMessageIds);
   } catch (error) {
     errors.push(error.message);
   }
@@ -461,10 +472,10 @@ export function validateBulkReviewSession(session, expected = {}) {
       errors.push("totals.batches does not match committedPlanIds");
     }
     if (
-      recordedOccurrences &&
-      session.totals.presented !== countOccurrences(recordedOccurrences)
+      recordedMessageIds &&
+      session.totals.presented !== recordedMessageIds.length
     ) {
-      errors.push("totals.presented does not match recorded occurrences");
+      errors.push("totals.presented does not match recorded message ids");
     }
   }
   if (typeof session.exhausted !== "boolean") {

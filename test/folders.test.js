@@ -4,11 +4,29 @@ import {
   discoverExistingCustomerFolders,
   folderIsInside,
   folderOrAncestorHasSpecialUse,
+  listAccounts,
   resolveCustomerFolder,
   resolveOrganizerArchive,
   setupAllCustomerFolders
 } from "../extension/lib/folders.js";
 import {SPECIAL_SOURCE_TYPES} from "../extension/lib/constants.js";
+
+test("mail account discovery excludes Local Folders", async () => {
+  const accounts = [
+    {id: "imap", type: "imap"},
+    {id: "pop", type: "pop3"},
+    {id: "ews", type: "ews"},
+    {id: "local", type: "local"},
+    {id: "none", type: "none"}
+  ];
+  assert.deepEqual(
+    (await listAccounts({accounts: {list: async complete => {
+      assert.equal(complete, true);
+      return accounts;
+    }}})).map(account => account.id),
+    ["imap", "pop", "ews"]
+  );
+});
 
 test("folder ancestry uses Thunderbird parent IDs", async () => {
   const folder = {id: "child", accountId: "work", name: "Child"};
@@ -231,7 +249,7 @@ test("stale organizer destinations that become special-use are rejected", async 
       "acme",
       "customers"
     ),
-    /customer root/u
+    /domain root/u
   );
 });
 
@@ -298,23 +316,9 @@ function existingFolderSetup({rootSpecialUse = [], archiveSpecialUse = []} = {})
   return {account, config, api, getCreateCalls: () => createCalls};
 }
 
-test("explicit setup approval adopts exact existing root, archive, and customer folders", async () => {
+test("setup automatically uses exact existing root, archive, and customer folders", async () => {
   const fixture = existingFolderSetup();
-  const result = await setupAllCustomerFolders(
-    fixture.config,
-    [fixture.account],
-    fixture.api,
-    {
-      folderApprovals: {
-        work: {
-          rootFolderName: "Customers",
-          archiveFolderName: "Organizer Archive",
-          adoptExistingRoot: true,
-          adoptExistingArchive: true
-        }
-      }
-    }
-  );
+  const result = await setupAllCustomerFolders(fixture.config, [fixture.account], fixture.api);
 
   assert.deepEqual(result.errors, []);
   assert.equal(fixture.config.accounts.work.customerRootReady, true);
@@ -326,7 +330,7 @@ test("explicit setup approval adopts exact existing root, archive, and customer 
   );
 });
 
-test("setup does not adopt existing folders without exact-name approval", async () => {
+test("setup ignores obsolete approval input and uses the configured exact names", async () => {
   const fixture = existingFolderSetup();
   const result = await setupAllCustomerFolders(
     fixture.config,
@@ -344,15 +348,13 @@ test("setup does not adopt existing folders without exact-name approval", async 
     }
   );
 
-  assert.equal(result.errors.length, 2);
-  assert.ok(result.errors.some(error => /not an approved organizer root/u.test(error)));
-  assert.ok(result.errors.some(error => /already exists/u.test(error)));
-  assert.equal(fixture.config.accounts.work.customerRootReady, false);
-  assert.equal(fixture.config.accounts.work.archiveReady, false);
+  assert.deepEqual(result.errors, []);
+  assert.equal(fixture.config.accounts.work.customerRootReady, true);
+  assert.equal(fixture.config.accounts.work.archiveReady, true);
   assert.equal(fixture.getCreateCalls(), 0);
 });
 
-test("explicit adoption fails closed when the approved folders are absent", async () => {
+test("setup creates configured root and archive when they are absent", async () => {
   const account = {
     id: "work",
     name: "Work",
@@ -374,9 +376,13 @@ test("explicit adoption fails closed when the approved folders are absent", asyn
   const api = {
     folders: {
       getSubFolders: async () => [],
-      create: async () => {
+      getFolderCapabilities: async id => ({
+        canAddSubfolders: id === "root" || id === "created-Customers",
+        canAddMessages: id === "created-Organizer Archive"
+      }),
+      create: async (_parentId, name) => {
         createCalls += 1;
-        return {id: "unexpected"};
+        return {id: `created-${name}`, accountId: "work", name, specialUse: []};
       }
     }
   };
@@ -392,11 +398,10 @@ test("explicit adoption fails closed when the approved folders are absent", asyn
     }
   });
 
-  assert.equal(result.errors.length, 2);
-  assert.ok(result.errors.every(error => /No existing folder named/u.test(error)));
-  assert.equal(config.accounts.work.customerRootReady, false);
-  assert.equal(config.accounts.work.archiveReady, false);
-  assert.equal(createCalls, 0);
+  assert.deepEqual(result.errors, []);
+  assert.equal(config.accounts.work.customerRootReady, true);
+  assert.equal(config.accounts.work.archiveReady, true);
+  assert.equal(createCalls, 2);
 });
 
 test("special-use folders cannot be adopted even with explicit approval", async () => {

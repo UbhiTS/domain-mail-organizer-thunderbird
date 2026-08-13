@@ -23,7 +23,6 @@ import {
   parseMailboxValues,
   queryFolderMessages
 } from "./mail.js";
-import {messageFingerprint} from "./fingerprint.js";
 import {classifyMessage} from "./rules.js";
 
 function planId() {
@@ -108,27 +107,23 @@ function scanBudget(limit) {
   return Math.max(limit, Math.min(5_000, limit * 5));
 }
 
-function positiveCountMap(raw = {}) {
-  const counts = new Map();
-  for (const [fingerprint, value] of Object.entries(raw ?? {})) {
-    const count = Math.floor(Number(value));
-    if (fingerprint && Number.isFinite(count) && count > 0) {
-      counts.set(fingerprint, count);
-    }
+function messageIdSet(raw = []) {
+  if (!Array.isArray(raw)) {
+    throw new TypeError("bulk.examinedMessageIds must be an array");
   }
-  return counts;
-}
-
-function incrementObjectCount(counts, key) {
-  counts[key] = (counts[key] ?? 0) + 1;
-}
-
-function consumeCount(counts, key) {
-  const count = counts.get(key) ?? 0;
-  if (count <= 0) return false;
-  if (count === 1) counts.delete(key);
-  else counts.set(key, count - 1);
-  return true;
+  const ids = new Set();
+  for (const [index, id] of raw.entries()) {
+    if (!Number.isSafeInteger(id) || id < 0) {
+      throw new TypeError(
+        `bulk.examinedMessageIds[${index}] must be a non-negative safe integer`
+      );
+    }
+    if (ids.has(id)) {
+      throw new TypeError("bulk.examinedMessageIds must contain unique message ids");
+    }
+    ids.add(id);
+  }
+  return ids;
 }
 
 async function classifyHeader(header, config, accountId, api, options = {}) {
@@ -173,7 +168,7 @@ async function getSourceFolder(account, accountConfig, source, api) {
     const archive = await resolveOrganizerArchive(account, accountConfig, false, api);
     if (!archive) {
       throw new Error(
-        `No organizer archive folder was found for “${account.name}”. Run folder setup first.`
+        `No configured Archive folder was found for “${account.name}”. Choose Save & set up first.`
       );
     }
     return {folder: archive, includeSubFolders: false};
@@ -209,7 +204,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
   const customerRoot = await resolveCustomerRoot(account, accountConfig, false, api);
   if (automatic && accountConfig.customerRootReady && !customerRoot) {
     throw new Error(
-      "The approved customer root is missing. Run Save & set up folders before automatic filing resumes."
+      "The configured domain root is missing. Choose Save & set up before automatic filing resumes."
     );
   }
   // An automatic Inbox move has no dependency on the optional organizer
@@ -227,21 +222,30 @@ export async function buildOrganizePlan(request, config, api = messenger) {
     ? Number.POSITIVE_INFINITY
     : scanBudget(config.maxMessagesPerRun);
   const bulk = !automatic && request.bulk ? request.bulk : null;
-  const previouslyExamined = positiveCountMap(bulk?.examinedCounts);
-  const bulkExaminedCounts = {};
+  const previouslyExamined = messageIdSet(bulk?.examinedMessageIds);
+  const examinedThisBatch = new Set();
+  const bulkExaminedMessageIds = [];
 
   let stopReason = null;
   let scanned = 0;
   for await (const header of iterateMessageList(messageList, api)) {
-    const fingerprint = bulk ? messageFingerprint(header) : null;
-    if (bulk && consumeCount(previouslyExamined, fingerprint)) {
-      continue;
+    const currentMessageId = bulk ? header?.id : null;
+    if (bulk) {
+      if (!Number.isSafeInteger(currentMessageId) || currentMessageId < 0) {
+        throw new TypeError("Bulk Inbox scan returned an invalid Thunderbird message id");
+      }
+      if (previouslyExamined.has(currentMessageId) || examinedThisBatch.has(currentMessageId)) {
+        continue;
+      }
     }
     if (scanned >= maximumScanned) {
       stopReason = "scan-budget";
       break;
     }
-    if (bulk) incrementObjectCount(bulkExaminedCounts, fingerprint);
+    if (bulk) {
+      examinedThisBatch.add(currentMessageId);
+      bulkExaminedMessageIds.push(currentMessageId);
+    }
     scanned += 1;
     const base = compactHeader(header);
     if (messageAccountId(header) && messageAccountId(header) !== account.id) {
@@ -293,7 +297,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
       continue;
     }
     if (request.source !== "archive" && organizerArchive?.id === sourceId) {
-      recorder.record({...base, status: "skipped", reason: "Already inside the organizer archive"});
+      recorder.record({...base, status: "skipped", reason: "Already inside the configured Archive folder"});
       continue;
     }
 
@@ -312,7 +316,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
       // Automatic jobs resolve their destination while applying each item.
       // That keeps one unavailable customer folder from aborting unrelated
       // customers in the same new-mail event, and permits a configured missing
-      // child folder to be created under the approved customer root.
+      // child folder to be created under the verified domain root.
       const destination = automatic ? null : destinations.get(customer.id);
       const destinationExists = automatic ? null : Boolean(destination);
       recorder.record({
@@ -350,7 +354,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
     : request.source === "inbox"
       ? "Process Inbox"
       : request.source === "archive"
-        ? "Recover from Organizer Archive"
+        ? "Recover from Archive"
         : `Organize ${sourceDescription}`;
 
   return {
@@ -374,7 +378,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
     truncated: stopReason !== null || recorder.sampled,
     scanned,
     scanBudget: maximumScanned,
-    ...(bulk ? {bulkExaminedCounts} : {}),
+    ...(bulk ? {bulkExaminedMessageIds} : {}),
     items: recorder.items,
     summary: recorder.summary
   };
@@ -393,7 +397,7 @@ export async function buildArchivePlan(request, config, api = messenger) {
   const archive = await resolveOrganizerArchive(account, accountConfig, false, api);
   if (!archive) {
     throw new Error(
-      `No organizer archive folder was found for “${account.name}”. Run folder setup first.`
+      `No configured Archive folder was found for “${account.name}”. Choose Save & set up first.`
     );
   }
   const inboxCapabilities = await api.folders.getFolderCapabilities(inbox.id);
@@ -568,6 +572,7 @@ export async function applyPlan(
     await notify?.(progress);
     let destinationFolderId = item.destinationFolderId ?? null;
     let moveAttempted = false;
+    let moveConfirmationStatus = null;
     try {
       const header = await api.messages.get(item.messageId);
       if (messageFolderId(header) !== item.sourceFolderId) {
@@ -619,7 +624,7 @@ export async function applyPlan(
           );
         }
         if (!archiveDestination || archiveDestination.id !== item.destinationFolderId) {
-          throw new Error("Organizer archive folder changed after the preview");
+          throw new Error("The configured Archive folder changed after the preview");
         }
         destinationFolderId = archiveDestination.id;
         moveAttempted = true;
@@ -696,7 +701,7 @@ export async function applyPlan(
           isUserAction: options.isUserAction !== false
         });
         if (options.confirmMove) {
-          await options.confirmMove(
+          const confirmation = await options.confirmMove(
             {
               messageId: header.id,
               sourceFolderId: item.sourceFolderId,
@@ -705,6 +710,7 @@ export async function applyPlan(
             },
             moveOperation
           );
+          moveConfirmationStatus = confirmation?.status ?? null;
         } else {
           await moveOperation();
         }
@@ -713,7 +719,8 @@ export async function applyPlan(
         itemId: item.id,
         status: "completed",
         destinationFolderId,
-        moveAttempted
+        moveAttempted,
+        ...(moveConfirmationStatus ? {moveConfirmationStatus} : {})
       });
     } catch (error) {
       results.push({

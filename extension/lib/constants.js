@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 export const CONFIG_KEY = "config";
 export const LAST_RUN_KEY = "lastRun";
-export const CONFIG_SCHEMA_VERSION = 2;
+export const CONFIG_SCHEMA_VERSION = 3;
 export const PLAN_KEY_PREFIX = "plan:";
 export const CURRENT_PLAN_KEY = "currentPlanId";
 export const BULK_SESSION_KEY_PREFIX = "bulkSession:";
@@ -25,11 +25,13 @@ export const DEFAULT_CONFIG = Object.freeze({
 });
 
 export const DEFAULT_ACCOUNT_CONFIG = Object.freeze({
+  initialized: false,
   enabled: false,
-  rootFolderName: "Customers",
+  rootFolderName: "Domains",
   customerRootReady: false,
-  archiveFolderName: "Organizer Archive",
+  archiveFolderName: "Archive",
   archiveReady: false,
+  autoFileRequested: true,
   autoFileIncoming: false,
   autoFileSince: null,
   internalContactDomains: []
@@ -37,7 +39,7 @@ export const DEFAULT_ACCOUNT_CONFIG = Object.freeze({
 
 export const SOURCE_LABELS = Object.freeze({
   inbox: "Inbox",
-  archive: "Organizer Archive",
+  archive: "Archive",
   selection: "selected messages",
   current: "current folder"
 });

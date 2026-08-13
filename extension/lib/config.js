@@ -51,52 +51,70 @@ function randomId() {
   return `customer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function normalizeAccountConfig(value = {}) {
+export function normalizeAccountConfig(value = {}, {existing = true} = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+  const initialized = typeof source.initialized === "boolean"
+    ? source.initialized
+    : existing;
+  const legacyAutomatic = asBoolean(
+    source.autoFileIncoming,
+    DEFAULT_ACCOUNT_CONFIG.autoFileIncoming
+  );
   return {
-    enabled: asBoolean(value.enabled, DEFAULT_ACCOUNT_CONFIG.enabled),
+    initialized,
+    enabled: asBoolean(source.enabled, DEFAULT_ACCOUNT_CONFIG.enabled),
     rootFolderName:
-      typeof value.rootFolderName === "string" && value.rootFolderName.trim()
-        ? value.rootFolderName.trim().normalize("NFC")
+      typeof source.rootFolderName === "string" && source.rootFolderName.trim()
+        ? source.rootFolderName.trim().normalize("NFC")
         : DEFAULT_ACCOUNT_CONFIG.rootFolderName,
     customerRootReady: asBoolean(
-      value.customerRootReady,
+      source.customerRootReady,
       DEFAULT_ACCOUNT_CONFIG.customerRootReady
     ),
     archiveFolderName:
-      typeof value.archiveFolderName === "string" && value.archiveFolderName.trim()
-        ? value.archiveFolderName.trim().normalize("NFC")
+      typeof source.archiveFolderName === "string" && source.archiveFolderName.trim()
+        ? source.archiveFolderName.trim().normalize("NFC")
         : DEFAULT_ACCOUNT_CONFIG.archiveFolderName,
-    archiveReady: asBoolean(value.archiveReady, DEFAULT_ACCOUNT_CONFIG.archiveReady),
-    autoFileIncoming: asBoolean(
-      value.autoFileIncoming,
-      DEFAULT_ACCOUNT_CONFIG.autoFileIncoming
+    archiveReady: asBoolean(source.archiveReady, DEFAULT_ACCOUNT_CONFIG.archiveReady),
+    // autoFileRequested is the user's durable preference. autoFileIncoming is
+    // the readiness-gated runtime state. Keeping them separate lets a new
+    // account default to automatic filing without running before setup.
+    autoFileRequested: asBoolean(
+      source.autoFileRequested,
+      initialized ? legacyAutomatic : DEFAULT_ACCOUNT_CONFIG.autoFileRequested
     ),
-    autoFileSince: normalizedTimestamp(value.autoFileSince),
+    autoFileIncoming: legacyAutomatic,
+    autoFileSince: normalizedTimestamp(source.autoFileSince),
     internalContactDomains: normalizedStringList(
-      value.internalContactDomains,
+      source.internalContactDomains,
       normalizeDomain
     )
   };
 }
 
 export function normalizeCustomer(value = {}) {
-  const name = typeof value.name === "string" ? value.name.trim() : "";
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+  const name = typeof source.name === "string" ? source.name.trim() : "";
   const folderName =
-    typeof value.folderName === "string" ? value.folderName.trim().normalize("NFC") : "";
+    typeof source.folderName === "string" ? source.folderName.trim().normalize("NFC") : "";
 
   return {
-    id: typeof value.id === "string" && value.id ? value.id : randomId(),
+    id: typeof source.id === "string" && source.id ? source.id : randomId(),
     name,
     folderName: folderName || name,
-    enabled: asBoolean(value.enabled, true),
+    enabled: asBoolean(source.enabled, true),
     accountIds: unique(
-      (Array.isArray(value.accountIds) ? value.accountIds : []).filter(
+      (Array.isArray(source.accountIds) ? source.accountIds : []).filter(
         accountId => typeof accountId === "string" && accountId
       )
     ),
-    domains: normalizedStringList(value.domains, normalizeDomain),
-    addresses: normalizedStringList(value.addresses, normalizeEmail),
-    keywords: normalizedStringList(value.keywords, normalizeKeyword)
+    domains: normalizedStringList(source.domains, normalizeDomain),
+    addresses: normalizedStringList(source.addresses, normalizeEmail),
+    keywords: normalizedStringList(source.keywords, normalizeKeyword)
   };
 }
 
@@ -105,39 +123,46 @@ export function customerHasUnsafeDomain(customer) {
 }
 
 export function normalizeConfig(raw = {}, accounts = []) {
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const accountIds = new Set(accounts.map(account => account.id));
-  const incomingAccounts = raw.accounts && typeof raw.accounts === "object" ? raw.accounts : {};
+  const incomingAccounts = source.accounts && typeof source.accounts === "object" && !Array.isArray(source.accounts)
+    ? source.accounts
+    : {};
   const normalizedAccounts = {};
 
   for (const account of accounts) {
-    normalizedAccounts[account.id] = normalizeAccountConfig(incomingAccounts[account.id]);
+    const existing = Object.hasOwn(incomingAccounts, account.id);
+    normalizedAccounts[account.id] = normalizeAccountConfig(
+      incomingAccounts[account.id],
+      {existing}
+    );
   }
 
   // Preserve unavailable account settings. They may become available again after
   // a temporary account or network issue, but never act on them while absent.
   for (const [accountId, value] of Object.entries(incomingAccounts)) {
     if (!accountIds.has(accountId)) {
-      normalizedAccounts[accountId] = normalizeAccountConfig(value);
+      normalizedAccounts[accountId] = normalizeAccountConfig(value, {existing: true});
     }
   }
 
   return {
     schemaVersion: CONFIG_SCHEMA_VERSION,
-    revision: boundedInteger(raw.revision, DEFAULT_CONFIG.revision, 0, Number.MAX_SAFE_INTEGER),
-    defaultDays: [0, 1, 2, 7, 30].includes(Number(raw.defaultDays))
-      ? Number(raw.defaultDays)
+    revision: boundedInteger(source.revision, DEFAULT_CONFIG.revision, 0, Number.MAX_SAFE_INTEGER),
+    defaultDays: [0, 1, 2, 7, 30].includes(Number(source.defaultDays))
+      ? Number(source.defaultDays)
       : DEFAULT_CONFIG.defaultDays,
     maxMessagesPerRun: boundedInteger(
-      raw.maxMessagesPerRun,
+      source.maxMessagesPerRun,
       DEFAULT_CONFIG.maxMessagesPerRun,
       25,
       1000
     ),
-    scanSubject: asBoolean(raw.scanSubject, DEFAULT_CONFIG.scanSubject),
-    scanBody: asBoolean(raw.scanBody, DEFAULT_CONFIG.scanBody),
-    preserveFlagged: asBoolean(raw.preserveFlagged, DEFAULT_CONFIG.preserveFlagged),
+    scanSubject: asBoolean(source.scanSubject, DEFAULT_CONFIG.scanSubject),
+    scanBody: asBoolean(source.scanBody, DEFAULT_CONFIG.scanBody),
+    preserveFlagged: asBoolean(source.preserveFlagged, DEFAULT_CONFIG.preserveFlagged),
     accounts: normalizedAccounts,
-    customers: (Array.isArray(raw.customers) ? raw.customers : []).map(normalizeCustomer)
+    customers: (Array.isArray(source.customers) ? source.customers : []).map(normalizeCustomer)
   };
 }
 
@@ -158,7 +183,7 @@ export function validateConfig(config, accounts = []) {
     }
     const archiveFolderError = validateFolderName(accountConfig.archiveFolderName);
     if (archiveFolderError) {
-      errors.push(`Account organizer archive folder: ${archiveFolderError}`);
+      errors.push(`Account archive folder: ${archiveFolderError}`);
     }
     if (
       !folderError &&
@@ -166,7 +191,7 @@ export function validateConfig(config, accounts = []) {
       accountConfig.rootFolderName.normalize("NFC").toLocaleLowerCase() ===
         accountConfig.archiveFolderName.normalize("NFC").toLocaleLowerCase()
     ) {
-      errors.push("The customer root and organizer archive folders must have different names.");
+      errors.push("The domain root and archive folders must have different names.");
     }
     const account = availableAccountDetails.get(accountId);
     const identityDomains = internalDomainsFromIdentities(account?.identities);

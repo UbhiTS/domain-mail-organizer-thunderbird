@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
 import {MAX_BODY_CHARACTERS} from "./constants.js";
+import {boundedMailboxStrings} from "./input-limits.js";
 import {fallbackParseMailboxString, normalizeEmail} from "./rules.js";
 
 function flattenParsedMailbox(entries) {
@@ -20,9 +21,7 @@ function flattenParsedMailbox(entries) {
 }
 
 export async function parseMailboxValues(values, api = messenger) {
-  const strings = (Array.isArray(values) ? values : [values]).filter(
-    value => typeof value === "string" && value
-  );
+  const strings = boundedMailboxStrings(values);
   const emails = [];
 
   for (const value of strings) {

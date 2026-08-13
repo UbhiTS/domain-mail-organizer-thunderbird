@@ -13,6 +13,10 @@ import {
   parseMailboxCandidates,
   parseMessageContactCandidates
 } from "../extension/lib/contacts.js";
+import {
+  MAX_MAILBOX_HEADER_CHARACTERS,
+  MAX_MAILBOX_HEADER_VALUES
+} from "../extension/lib/input-limits.js";
 
 test("parses named mailboxes and nested groups through Thunderbird", async () => {
   const calls = [];
@@ -42,6 +46,33 @@ test("parses named mailboxes and nested groups through Thunderbird", async () =>
     {name: "Böb", email: "bob@example.com"}
   ]);
   assert.deepEqual(calls, [["team", true]]);
+});
+
+test("bounds contact mailbox parsing before Thunderbird and fallback parsing", async () => {
+  const calls = [];
+  const api = {
+    messengerUtilities: {
+      parseMailboxString: async value => {
+        calls.push(value);
+        throw new Error("use fallback");
+      }
+    }
+  };
+  const values = Array.from(
+    {length: MAX_MAILBOX_HEADER_VALUES + 10},
+    (_value, index) => `person-${index}@example.com`
+  );
+  assert.equal((await parseMailboxCandidates(values, api)).length,
+    MAX_MAILBOX_HEADER_VALUES);
+  assert.equal(calls.length, MAX_MAILBOX_HEADER_VALUES);
+
+  calls.length = 0;
+  const candidates = await parseMailboxCandidates(
+    `early@example.com, ${"x".repeat(MAX_MAILBOX_HEADER_CHARACTERS)}, late@example.com`,
+    api
+  );
+  assert.deepEqual(candidates, []);
+  assert.equal(calls.length, 0);
 });
 
 test("normalizes and deduplicates candidates while preserving the useful name", () => {

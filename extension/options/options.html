@@ -22,27 +22,21 @@
         <button id="export" class="secondary">Export JSON</button>
         <button id="import" class="secondary">Import JSON</button>
         <input id="importFile" type="file" accept="application/json,.json" hidden>
-        <button id="save" class="primary">Save settings</button>
+        <button id="save" class="primary">Save &amp; set up</button>
       </div>
     </header>
 
     <main>
       <div id="status" class="banner hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
-      <section class="panel intro">
-        <h2>Safe by default</h2>
-        <p>Previews never move messages or create folders. Setup and explicit Apply actions can create folders. An existing root or archive folder is used only when you approve that exact name below. After setup, automatic filing can recreate a missing configured customer child, but never an unapproved or missing customer root. When automatic filing moves a matched message, its customer contacts and any separately approved internal coworkers are added to the managed address book. If that book becomes unavailable, both automatic actions pause together. Starred messages remain protected by default.</p>
-      </section>
-
       <section id="mailAccountsPanel" class="panel">
         <div class="section-heading">
           <div>
             <h2>Mail accounts</h2>
-            <p>Each enabled account gets its own customer-folder tree; automatic moves never cross accounts.</p>
+            <p>Setup reuses folders with the configured domain-root and archive names or creates them when missing, then imports direct child folders as customer rules. Automatic moves never cross accounts.</p>
           </div>
           <div class="section-actions">
             <button id="buildAddressBooks" class="secondary" type="button" aria-controls="status">Build address books from existing mail</button>
-            <button id="setupFolders" class="secondary" type="button">Save &amp; set up folders</button>
           </div>
         </div>
         <div id="accounts" class="account-grid"></div>
@@ -51,40 +45,77 @@
       <section id="manualToolsPanel" class="panel" aria-labelledby="manualToolsTitle">
         <div class="section-heading">
           <div>
-            <h2 id="manualToolsTitle">Mail processing tools</h2>
-            <p>Process an entire Inbox in safe review batches, or recover customer mail from the Organizer Archive. These tools use your saved customer rules.</p>
+            <h2 id="manualToolsTitle">Mail processing</h2>
+            <p>Set matching defaults, process an entire Inbox in review batches, or recover customer mail from the Archive.</p>
           </div>
         </div>
-        <div class="manual-tools-grid">
-          <label class="field">
-            <span>Mail account</span>
-            <select id="manualAccount"></select>
-          </label>
-          <label class="field">
-            <span>Recovery time window</span>
-            <select id="manualDays">
-              <option value="1">1 Day</option>
-              <option value="2">2 Days</option>
-              <option value="7">7 Days</option>
-              <option value="30">30 Days</option>
-              <option value="0">All dates</option>
-            </select>
-          </label>
-        </div>
-        <p id="manualToolsNotice" class="muted hidden">Enable a mail account and add at least one customer before using these tools.</p>
-        <div class="manual-tool-actions" aria-label="Mail processing tools">
-          <button id="processEntireInbox" class="primary descriptive-action" type="button" aria-controls="status">
-            <strong>Process entire Inbox</strong>
-            <small>All dates; review and apply customer moves in safe batches</small>
-          </button>
-          <button id="recoverArchive" class="secondary descriptive-action" type="button" aria-controls="status">
-            <strong>Recover from Organizer Archive</strong>
-            <small>Review archived mail and return matches to customer folders</small>
-          </button>
+        <div class="processing-layout">
+          <section class="processing-group" aria-labelledby="processingDefaultsTitle">
+            <h3 id="processingDefaultsTitle">Processing defaults</h3>
+            <div class="settings-grid">
+              <label class="field">
+                <span>Default time window</span>
+                <select id="defaultDays">
+                  <option value="1">1 Day</option>
+                  <option value="2">2 Days</option>
+                  <option value="7">7 Days</option>
+                  <option value="30">30 Days</option>
+                  <option value="0">All</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Maximum messages per preview</span>
+                <input id="maxMessages" type="number" min="25" max="1000" step="25">
+              </label>
+              <label class="check-row">
+                <input id="scanSubject" type="checkbox">
+                <span><strong>Match subject</strong><small>Look for exact configured customer domains and keywords.</small></span>
+              </label>
+              <label class="check-row">
+                <input id="scanBody" type="checkbox">
+                <span><strong>Match message body</strong><small>Useful when colleagues reply to customer threads; may fetch IMAP content.</small></span>
+              </label>
+              <label class="check-row">
+                <input id="preserveFlagged" type="checkbox">
+                <span><strong>Protect starred messages</strong><small>Never move or archive messages marked with a star.</small></span>
+              </label>
+            </div>
+          </section>
+          <section class="processing-group" aria-labelledby="processingToolsTitle">
+            <h3 id="processingToolsTitle">Mailbox tools</h3>
+            <p class="muted processing-group-copy">These tools use your saved customer rules and always open a review before moving mail.</p>
+            <div class="manual-tools-grid">
+              <label class="field">
+                <span>Mail account</span>
+                <select id="manualAccount"></select>
+              </label>
+              <label class="field">
+                <span>Recovery time window</span>
+                <select id="manualDays">
+                  <option value="1">1 Day</option>
+                  <option value="2">2 Days</option>
+                  <option value="7">7 Days</option>
+                  <option value="30">30 Days</option>
+                  <option value="0">All dates</option>
+                </select>
+              </label>
+            </div>
+            <p id="manualToolsNotice" class="muted hidden">Enable a mail account and add at least one customer before using these tools.</p>
+            <div class="manual-tool-actions" aria-label="Mailbox tools">
+              <button id="processEntireInbox" class="primary descriptive-action" type="button" aria-controls="status">
+                <strong>Process entire Inbox</strong>
+                <small>All dates; review and apply customer moves in safe batches</small>
+              </button>
+              <button id="recoverArchive" class="secondary descriptive-action" type="button" aria-controls="status">
+                <strong>Recover from Archive</strong>
+                <small>Review archived mail and return matches to customer folders</small>
+              </button>
+            </div>
+          </section>
         </div>
       </section>
 
-      <section class="panel">
+      <section id="customerRulesPanel" class="panel">
         <div class="section-heading">
           <div>
             <h2>Customer rules</h2>
@@ -93,38 +124,6 @@
           <button id="addCustomer" class="secondary">Add customer</button>
         </div>
         <div id="customers" class="customer-list"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Processing defaults</h2>
-        <div class="settings-grid">
-          <label class="field">
-            <span>Default time window</span>
-            <select id="defaultDays">
-              <option value="1">1 Day</option>
-              <option value="2">2 Days</option>
-              <option value="7">7 Days</option>
-              <option value="30">30 Days</option>
-              <option value="0">All</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Maximum messages per preview</span>
-            <input id="maxMessages" type="number" min="25" max="1000" step="25">
-          </label>
-          <label class="check-row">
-            <input id="scanSubject" type="checkbox">
-            <span><strong>Match subject</strong><small>Look for exact configured customer domains and keywords.</small></span>
-          </label>
-          <label class="check-row">
-            <input id="scanBody" type="checkbox">
-            <span><strong>Match message body</strong><small>Useful when colleagues reply to customer threads; may fetch IMAP content.</small></span>
-          </label>
-          <label class="check-row">
-            <input id="preserveFlagged" type="checkbox">
-            <span><strong>Protect starred messages</strong><small>Never move or archive messages marked with a star.</small></span>
-          </label>
-        </div>
       </section>
     </main>
 
@@ -136,39 +135,29 @@
         </label>
         <div class="folder-setting">
           <label class="field">
-            <span>Customer root folder</span>
-            <input class="root-folder" type="text" maxlength="80" placeholder="Customers">
+            <span>Domain root folder</span>
+            <input class="root-folder" type="text" maxlength="80" placeholder="Domains">
           </label>
-          <label class="check-row folder-approval root-approval">
-            <input class="adopt-root" type="checkbox">
-            <span>
-              <strong class="root-approval-title">Use an existing folder with this name</strong>
-              <small class="root-approval-help">One-time approval: its direct customer subfolders may receive organized mail. Existing messages are not changed during setup.</small>
-            </span>
-          </label>
-          <button class="import-customer-folders secondary" type="button">Import existing customer folders...</button>
         </div>
         <div class="folder-setting">
           <label class="field">
-            <span>Organizer archive folder</span>
-            <input class="archive-folder" type="text" maxlength="80" placeholder="Organizer Archive">
-          </label>
-          <label class="check-row folder-approval archive-approval">
-            <input class="adopt-archive" type="checkbox">
-            <span>
-              <strong class="archive-approval-title">Use an existing folder with this name</strong>
-              <small class="archive-approval-help">One-time approval: future archive actions may move messages here. Setup changes nothing already inside; recovery will treat its current contents as organizer archive mail.</small>
-            </span>
+            <span>Archive folder</span>
+            <input class="archive-folder" type="text" maxlength="80" placeholder="Archive">
+            <small>Uses an ordinary dedicated mail folder. If Thunderbird already has a special-use Archive with this name, choose a different name.</small>
           </label>
         </div>
-        <label class="check-row automation-row">
-          <input class="auto-file" type="checkbox">
-          <span><strong>Auto-file new Inbox mail and add contacts</strong><small class="auto-file-help">Run folder setup first.</small></span>
-        </label>
-        <div class="internal-contacts-row">
-          <strong>Capture internal coworkers from customer mail</strong>
-          <small class="internal-contacts-help">No eligible identity domain was detected.</small>
-          <div class="internal-domain-options" role="group" aria-label="Exact internal domains"></div>
+        <div class="account-automation-settings" aria-label="Automatic mail and contact processing">
+          <label class="check-row automation-row">
+            <input class="auto-file" type="checkbox">
+            <span><strong>Auto-file new Inbox mail and add contacts</strong><small class="auto-file-help">Choose Save &amp; set up first.</small></span>
+          </label>
+          <div class="internal-contacts-row">
+            <label class="check-row">
+              <input class="capture-internal" type="checkbox">
+              <span><strong>Capture internal coworkers from customer mail</strong><small class="internal-contacts-help">No eligible identity domain was detected.</small></span>
+            </label>
+            <div class="internal-domain-options" role="group" aria-label="Exact internal domains"></div>
+          </div>
         </div>
       </article>
     </template>
@@ -220,45 +209,6 @@
           </div>
         </div>
       </details>
-    </template>
-
-    <dialog id="folderImportDialog" class="folder-import-dialog" aria-labelledby="folderImportTitle" aria-describedby="folderImportNotice">
-      <div class="dialog-heading">
-        <div>
-          <h2 id="folderImportTitle">Import existing customer folders</h2>
-          <p id="folderImportDescription" class="muted"></p>
-        </div>
-        <button id="cancelFolderImportTop" class="icon-button" type="button" aria-label="Close">&times;</button>
-      </div>
-      <p id="folderImportNotice" class="dialog-notice">Choose folders and review their exact matching domains. Folders without a valid domain are added disabled and expanded for completion. Adding rules does not move mail, change folders, or approve the customer root. For a new setup, also approve the existing root in its account card and choose Save &amp; set up folders.</p>
-      <div id="folderImportStatus" class="inline-status hidden" role="status" aria-live="polite"></div>
-      <div id="folderImportList" class="folder-import-list"></div>
-      <div class="dialog-actions">
-        <button id="cancelFolderImport" class="secondary" type="button">Cancel</button>
-        <button id="addFolderImports" class="primary" type="button">Add selected for review</button>
-      </div>
-    </dialog>
-
-    <template id="folderImportTemplate">
-      <article class="folder-import-row">
-        <label class="folder-import-select">
-          <input class="folder-import-enabled" type="checkbox" checked>
-          <span>
-            <strong class="folder-import-name"></strong>
-            <small class="folder-import-state"></small>
-          </span>
-        </label>
-        <div class="folder-import-fields">
-          <label class="field">
-            <span>Customer name</span>
-            <input class="folder-import-customer-name" type="text" maxlength="80">
-          </label>
-          <label class="field">
-            <span>Exact matching domains</span>
-            <input class="folder-import-domains" type="text" placeholder="customer.example">
-          </label>
-        </div>
-      </article>
     </template>
 
     <script type="module" src="options.js"></script>

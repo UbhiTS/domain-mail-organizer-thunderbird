@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: MIT
 import {
   domainFromEmail,
+  fallbackParseMailboxString,
   isRegistrableDomain,
   normalizeDomain,
   normalizeEmail
 } from "./rules.js";
-
-function stringValues(value) {
-  if (Array.isArray(value)) {
-    return value.flatMap(stringValues);
-  }
-  return typeof value === "string" && value ? [value] : [];
-}
+import {boundedMailboxStrings} from "./input-limits.js";
 
 function normalizeDisplayName(value) {
   if (typeof value !== "string") {
@@ -47,16 +42,7 @@ function flattenMailboxEntries(entries) {
 }
 
 function fallbackMailboxCandidates(value) {
-  const candidates = [];
-  const mailbox = /(?:((?:"(?:[^"\\]|\\.)*"|[^,<])*?)\s*<\s*)?([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+)\s*>?/giu;
-  for (const match of value.matchAll(mailbox)) {
-    let name = (match[1] ?? "").trim();
-    if (name.startsWith('"') && name.endsWith('"')) {
-      name = name.slice(1, -1).replace(/\\(["\\])/gu, "$1");
-    }
-    candidates.push({name, email: match[2]});
-  }
-  return candidates;
+  return fallbackParseMailboxString(value).map(email => ({name: "", email}));
 }
 
 /**
@@ -88,7 +74,7 @@ export function normalizeContactCandidates(candidates) {
 /** Parse one or more RFC mailbox header values using Thunderbird's parser. */
 export async function parseMailboxCandidates(values, api = globalThis.messenger) {
   const parsedValues = await Promise.all(
-    stringValues(values).map(async value => {
+    boundedMailboxStrings(values).map(async value => {
       try {
         const entries = await api.messengerUtilities.parseMailboxString(value, true);
         return flattenMailboxEntries(entries);

@@ -7,7 +7,6 @@ import {
   buildOrganizePlan
 } from "../extension/lib/plans.js";
 import {setupAllCustomerFolders} from "../extension/lib/folders.js";
-import {messageFingerprint} from "../extension/lib/fingerprint.js";
 
 function folders() {
   const root = {id: "root", accountId: "work", name: "Work", isRoot: true};
@@ -592,7 +591,7 @@ test("address reports scan all dates and pages without a preview cap or body rea
   ].sort((left, right) => right.count - left.count || left.address.localeCompare(right.address)));
 });
 
-test("bulk organize plans stop at the action limit and resume after previously examined occurrences", async () => {
+test("bulk organize plans stop at the action limit and resume after previously examined message ids", async () => {
   const messages = [];
   const {api, inbox} = bulkOrganizeApi(messages);
   messages.push(
@@ -603,7 +602,7 @@ test("bulk organize plans stop at the action limit and resume after previously e
     header(5, inbox, {author: "Customer <five@acme.com>"})
   );
   const rules = bulkOrganizeConfig(2);
-  const firstBulk = {sessionId: "bulk-session", batchNumber: 1, examinedCounts: {}};
+  const firstBulk = {sessionId: "bulk-session", batchNumber: 1, examinedMessageIds: []};
 
   const first = await buildOrganizePlan(
     {accountId: "work", source: "inbox", days: 0, bulk: firstBulk},
@@ -618,15 +617,11 @@ test("bulk organize plans stop at the action limit and resume after previously e
     first.items.filter(item => item.action).map(item => item.messageId),
     [2, 3]
   );
-  assert.deepEqual(first.bulkExaminedCounts, {
-    [messageFingerprint(messages[0])]: 1,
-    [messageFingerprint(messages[1])]: 1,
-    [messageFingerprint(messages[2])]: 1
-  });
+  assert.deepEqual(first.bulkExaminedMessageIds, [1, 2, 3]);
   assert.deepEqual(firstBulk, {
     sessionId: "bulk-session",
     batchNumber: 1,
-    examinedCounts: {}
+    examinedMessageIds: []
   });
 
   const second = await buildOrganizePlan(
@@ -637,7 +632,7 @@ test("bulk organize plans stop at the action limit and resume after previously e
       bulk: {
         sessionId: firstBulk.sessionId,
         batchNumber: 2,
-        examinedCounts: first.bulkExaminedCounts
+        examinedMessageIds: first.bulkExaminedMessageIds
       }
     },
     rules,
@@ -651,10 +646,7 @@ test("bulk organize plans stop at the action limit and resume after previously e
     second.items.filter(item => item.action).map(item => item.messageId),
     [5]
   );
-  assert.deepEqual(second.bulkExaminedCounts, {
-    [messageFingerprint(messages[3])]: 1,
-    [messageFingerprint(messages[4])]: 1
-  });
+  assert.deepEqual(second.bulkExaminedMessageIds, [4, 5]);
 });
 
 test("bulk organize plans advance beyond a non-actionable scan-budget prefix", async () => {
@@ -673,7 +665,7 @@ test("bulk organize plans advance beyond a non-actionable scan-budget prefix", a
       accountId: "work",
       source: "inbox",
       days: 0,
-      bulk: {sessionId: "budget-session", batchNumber: 1, examinedCounts: {}}
+      bulk: {sessionId: "budget-session", batchNumber: 1, examinedMessageIds: []}
     },
     rules,
     api
@@ -684,7 +676,7 @@ test("bulk organize plans advance beyond a non-actionable scan-budget prefix", a
   assert.equal(first.stopReason, "scan-budget");
   assert.equal(first.scanComplete, false);
   assert.equal(first.summary.actionable, 0);
-  assert.equal(Object.values(first.bulkExaminedCounts).reduce((sum, count) => sum + count, 0), 10);
+  assert.equal(first.bulkExaminedMessageIds.length, 10);
 
   const second = await buildOrganizePlan(
     {
@@ -694,7 +686,7 @@ test("bulk organize plans advance beyond a non-actionable scan-budget prefix", a
       bulk: {
         sessionId: "budget-session",
         batchNumber: 2,
-        examinedCounts: first.bulkExaminedCounts
+        examinedMessageIds: first.bulkExaminedMessageIds
       }
     },
     rules,
@@ -722,7 +714,7 @@ test("sampled diagnostic rows do not make an exhausted bulk scan incomplete", as
       accountId: "work",
       source: "inbox",
       days: 0,
-      bulk: {sessionId: "sample-session", batchNumber: 1, examinedCounts: {}}
+      bulk: {sessionId: "sample-session", batchNumber: 1, examinedMessageIds: []}
     },
     bulkOrganizeConfig(2),
     api
@@ -734,5 +726,51 @@ test("sampled diagnostic rows do not make an exhausted bulk scan incomplete", as
   assert.equal(plan.stopReason, null);
   assert.equal(plan.scanComplete, true);
   assert.equal(plan.truncated, true);
-  assert.equal(Object.values(plan.bulkExaminedCounts).reduce((sum, count) => sum + count, 0), 5);
+  assert.equal(plan.bulkExaminedMessageIds.length, 5);
+});
+
+test("bulk continuation does not lose an unseen identical message after moved duplicates disappear", async () => {
+  const messages = [];
+  const {api, inbox} = bulkOrganizeApi(messages);
+  messages.push(...Array.from({length: 26}, (_, index) => header(index + 1, inbox, {
+    headerMessageId: "<same-message-id@acme.test>",
+    author: "Customer <same@acme.com>",
+    subject: "Identical"
+  })));
+
+  const first = await buildOrganizePlan(
+    {
+      accountId: "work",
+      source: "inbox",
+      days: 0,
+      bulk: {sessionId: "duplicates", batchNumber: 1, examinedMessageIds: []}
+    },
+    bulkOrganizeConfig(25),
+    api
+  );
+
+  assert.equal(first.stopReason, "action-limit");
+  assert.deepEqual(first.bulkExaminedMessageIds, Array.from({length: 25}, (_, index) => index + 1));
+
+  // Applying batch one moves those 25 ids out of Inbox. The remaining header
+  // has the same stable fingerprint, but its Thunderbird id was never reviewed.
+  messages.splice(0, 25);
+  const second = await buildOrganizePlan(
+    {
+      accountId: "work",
+      source: "inbox",
+      days: 0,
+      bulk: {
+        sessionId: "duplicates",
+        batchNumber: 2,
+        examinedMessageIds: first.bulkExaminedMessageIds
+      }
+    },
+    bulkOrganizeConfig(25),
+    api
+  );
+
+  assert.equal(second.scanComplete, true);
+  assert.deepEqual(second.bulkExaminedMessageIds, [26]);
+  assert.deepEqual(second.items.filter(item => item.action).map(item => item.messageId), [26]);
 });

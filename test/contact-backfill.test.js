@@ -444,8 +444,8 @@ test("a missing customer folder is reported and skipped without being created", 
   assert.ok(progress.some(update => update.stage === "folder-skipped"));
 });
 
-test("an unapproved or missing customer root fails closed", async t => {
-  await t.test("unapproved", async () => {
+test("an unverified or missing domain root fails closed", async t => {
+  await t.test("not set up", async () => {
     let folderReads = 0;
     const api = scanApi();
     const original = api.folders.getSubFolders;
@@ -459,7 +459,7 @@ test("an unapproved or missing customer root fails closed", async t => {
         config: config([customer()], {customerRootReady: false}),
         api
       }),
-      /not approved/iu
+      /domain root has not been set up/iu
     );
     assert.equal(folderReads, 0);
   });
@@ -474,7 +474,7 @@ test("an unapproved or missing customer root fails closed", async t => {
   });
 });
 
-test("backfill rejects a customer root that changes during its read-only scan", async () => {
+test("backfill rejects a domain root that changes during its read-only scan", async () => {
   const acmeFolder = normalFolder("acme-folder", "Acme");
   let rootReads = 0;
   const api = scanApi({
@@ -501,7 +501,7 @@ test("backfill rejects a customer root that changes during its read-only scan", 
 
   await assert.rejects(
     scanExistingCustomerContacts({account, config: config(), api}),
-    /customer root changed/iu
+    /domain root changed/iu
   );
 });
 

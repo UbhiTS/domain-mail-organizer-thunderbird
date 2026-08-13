@@ -299,7 +299,10 @@ export async function importManagedContactGroups(
     try {
       const contactId = await api.addressBooks.contacts.create(
         target.id,
-        createContactVCard(candidate, organization)
+        // Mailbox display names are unauthenticated header text. Use the
+        // normalized address as FN so an attacker cannot create a misleading
+        // named contact (for example, "CEO") through a forged display name.
+        createContactVCard({...candidate, name: candidate.email}, organization)
       );
       existingEmails.add(candidate.email);
       summary.created += 1;
