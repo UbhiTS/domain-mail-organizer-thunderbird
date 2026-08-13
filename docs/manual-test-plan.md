@@ -70,18 +70,20 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 
 ## 6. Archive workflows
 
-- Preview **Inbox → Organizer Archive** with starred and unstarred Inbox mail.
+- Choose **Archive Mails** in the toolbar popup with starred and unstarred Inbox mail.
 - Confirm starred mail is excluded.
 - Apply and confirm selected messages move to the dedicated Organizer Archive folder/label.
 - Add a customer rule after archiving a matching message.
-- Run **Recover from Organizer Archive** and confirm the staged message can be recovered into its customer folder.
+- In Settings under **Mail processing tools**, run **Recover from Organizer Archive** and confirm the staged message can be recovered into its customer folder.
 - On Gmail/Google Workspace, confirm the recovery scan uses the dedicated label and never scans Gmail All Mail, Sent, Inbox, or an existing customer label as archive input.
 
-## 7. Address report
+## 7. Customer Contacts List
 
 - Select a direct customer folder in the active mail tab.
-- Run **List customer addresses**.
-- Confirm only addresses at the customer's exact configured domains appear; unconfigured subdomains are excluded, and configured exact addresses appear.
+- Run **Customer Contacts List** from the toolbar popup.
+- Confirm it scans all dates and all message-list pages in that exact folder even when the configured preview window is 7 or 30 days and the folder contains more messages than the preview limit.
+- Confirm every valid normalized From, To, Cc, and Bcc address appears, including the account's own identities, unrelated domains, and unconfigured subdomains. Bcc is best-effort because received messages may not expose it.
+- Confirm nested customer subfolders are not included and no message body is fetched.
 - Confirm addresses are ordered by descending message frequency.
 - Copy and paste the semicolon-separated result into a text editor.
 - Select a non-customer folder and confirm the report refuses to guess.
@@ -136,7 +138,7 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Scan more than one Thunderbird message-list page and confirm all pages up to the limit are processed.
 - Put more than 25 protected/unmatched messages before a matching message and confirm the later actionable message is still offered.
 - With the limit at 25, put the next match beyond 125 messages and confirm the preview stops at its explicit 125-message work budget instead of scanning the whole mailbox.
-- Seed an Inbox with 4,000 matching messages, set the limit to 1,000, and choose **Process entire Inbox**. Confirm four reviewed Apply batches move all 4,000, followed by a fifth read-only verification batch reporting the scan complete.
+- Seed an Inbox with 4,000 matching messages, set the limit to 1,000, and choose **Process entire Inbox** in Settings under **Mail processing tools**. Confirm four reviewed Apply batches move all 4,000, followed by a fifth read-only verification batch reporting the scan complete.
 - Seed more than one scan budget of protected/unmatched messages before a match. Confirm **Preview batch N+1** advances past the earlier occurrences and eventually offers the later match even though nothing in the first batch moved.
 - Confirm a completed scan with sampled non-actionable rows says that all messages were examined; it must not claim that the scan safety limit stopped the query.
 - Leave selected actions unapplied and choose the next batch. Confirm the warning explains they will remain in Inbox and be deferred for this run; cancel once, then explicitly accept and verify later mail is reachable.

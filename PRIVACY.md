@@ -24,6 +24,12 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   The scan exhausts all message-list pages without a message-count cap and may
   take time for large or remote folders. Exact global deduplication makes a
   completed or interrupted scan safe to run again.
+- The toolbar popup's read-only **Customer Contacts List** scans every message
+  header across all dates and pages in the currently selected direct customer
+  folder. It displays every available normalized From, To, Cc, and Bcc address,
+  including the account's own identities and addresses outside configured
+  customer domains. It does not scan subfolders, read message bodies, modify
+  messages, or write to any address book.
 - If the managed address book is deleted, renamed, or becomes read-only,
   automatic filing and contact capture pause together until setup is repaired.
 - Optional body matching reads message text locally and is disabled by

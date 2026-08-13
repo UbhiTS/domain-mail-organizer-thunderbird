@@ -14,7 +14,6 @@ import {
   resolveOrganizerArchive
 } from "./folders.js";
 import {
-  collectFolderMessages,
   displayRecipients,
   getMessageBody,
   iterateMessageList,
@@ -25,7 +24,7 @@ import {
   queryFolderMessages
 } from "./mail.js";
 import {messageFingerprint} from "./fingerprint.js";
-import {classifyMessage, normalizeDomain} from "./rules.js";
+import {classifyMessage} from "./rules.js";
 
 function planId() {
   return globalThis.crypto?.randomUUID?.() ?? `plan-${Date.now()}-${Math.random()}`;
@@ -346,6 +345,14 @@ export async function buildOrganizePlan(request, config, api = messenger) {
     }
   }
 
+  const title = request.messageList
+    ? `Organize ${sourceDescription}`
+    : request.source === "inbox"
+      ? "Process Inbox"
+      : request.source === "archive"
+        ? "Recover from Organizer Archive"
+        : `Organize ${sourceDescription}`;
+
   return {
     id: planId(),
     kind: "organize",
@@ -353,7 +360,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
     configRevision: config.revision,
     accountId: account.id,
     accountName: account.name,
-    title: `Organize ${sourceDescription}`,
+    title,
     description: `${account.name} · ${Number(request.days) > 0 ? `${request.days} day window` : "all mail"}`,
     request: request.messageList ? null : {
       kind: "organize",
@@ -441,7 +448,7 @@ export async function buildArchivePlan(request, config, api = messenger) {
     configRevision: config.revision,
     accountId: account.id,
     accountName: account.name,
-    title: "Move Inbox mail to Organizer Archive",
+    title: "Archive Mails",
     description: `${account.name} · ${Number(request.days) > 0 ? `${request.days} day window` : "all mail"}`,
     request: {
       kind: "archive",
@@ -473,7 +480,7 @@ export async function buildAddressReport(request, config, api = messenger) {
   const account = await getAccount(folder.accountId, api);
   if (request.accountId && account.id !== request.accountId) {
     throw new Error(
-      `The active folder belongs to “${account.name}”, not the account selected in the toolbar popup.`
+      `The active folder belongs to “${account.name}”, not the account selected in Domain Mail Organizer.`
     );
   }
   const accountConfig = config.accounts?.[account.id];
@@ -485,55 +492,23 @@ export async function buildAddressReport(request, config, api = messenger) {
     throw new Error(`“${folder.name}” is not a direct customer folder.`);
   }
 
-  const customer = config.customers.find(candidate =>
-    candidate.enabled &&
-    candidate.folderName.normalize("NFC").toLocaleLowerCase() ===
-      folder.name.normalize("NFC").toLocaleLowerCase() &&
-    (!candidate.accountIds.length || candidate.accountIds.includes(account.id))
-  );
-  const fallbackDomain = normalizeDomain(folder.name);
-  const domains = customer?.domains.length ? customer.domains : fallbackDomain ? [fallbackDomain] : [];
-  const exactAddresses = new Set(customer?.addresses ?? []);
-  if (!domains.length && !exactAddresses.size) {
-    throw new Error("This customer folder needs a domain or exact-address rule before addresses can be listed.");
-  }
-  const reportCustomer = customer ?? {
-    id: "address-report-folder",
-    enabled: true,
-    accountIds: [account.id],
-    domains,
-    addresses: [...exactAddresses],
-    keywords: []
-  };
-  const reportConfig = customer
-    ? config
-    : {...config, customers: [reportCustomer]};
-
-  const collected = await collectFolderMessages(
-    folder,
-    request.days,
-    config.maxMessagesPerRun,
-    false,
-    api
-  );
   const counts = new Map();
-  for (const header of collected.messages) {
+  let scanned = 0;
+
+  // This is an exhaustive, read-only report for the selected folder itself.
+  // Deliberately omit fromDate and any preview limit, then consume every page.
+  const messageList = queryFolderMessages(folder, 0, false, api, 100);
+  for await (const header of iterateMessageList(messageList, api)) {
+    scanned += 1;
+    if (messageAccountId(header) && messageAccountId(header) !== account.id) {
+      continue;
+    }
     const addresses = await parseMailboxValues(
       [header.author, ...(header.recipients ?? []), ...(header.ccList ?? []), ...(header.bccList ?? [])],
       api
     );
     for (const address of addresses) {
-      const classification = classifyMessage(
-        {authorEmails: [address], recipientEmails: []},
-        reportConfig,
-        account.id
-      );
-      if (
-        classification.status === "matched" &&
-        classification.customerId === reportCustomer.id
-      ) {
-        counts.set(address, (counts.get(address) ?? 0) + 1);
-      }
+      counts.set(address, (counts.get(address) ?? 0) + 1);
     }
   }
   const addresses = [...counts.entries()]
@@ -547,9 +522,11 @@ export async function buildAddressReport(request, config, api = messenger) {
     configRevision: config.revision,
     accountId: account.id,
     accountName: account.name,
-    title: `Addresses in ${account.name} / ${folder.name}`,
-    description: `${addresses.length} matching address${addresses.length === 1 ? "" : "es"} · ${collected.messages.length} messages scanned`,
-    truncated: collected.truncated,
+    title: `Customer Contacts List — ${account.name} / ${folder.name}`,
+    description: `${addresses.length} unique address${addresses.length === 1 ? "" : "es"} · ${scanned} messages scanned`,
+    scanComplete: true,
+    scanned,
+    truncated: false,
     addresses,
     summary: {total: addresses.length, actionable: 0, matched: addresses.length, ambiguous: 0, unmatched: 0, skipped: 0}
   };

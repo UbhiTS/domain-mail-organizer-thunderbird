@@ -156,6 +156,7 @@ test("archive plans use the dedicated organizer folder and a normal move", async
   const plan = await buildArchivePlan({accountId: "work", days: 0}, config(), api);
   const item = plan.items.find(candidate => candidate.action === "archive");
 
+  assert.equal(plan.title, "Archive Mails");
   assert.equal(item.destinationFolderId, "organizer-archive");
   const result = await applyPlan(plan, [item.id], config(), null, api);
   assert.equal(result.completed, 1);
@@ -423,7 +424,7 @@ test("address reports refuse a popup account mismatch", async () => {
   );
 });
 
-test("address reports use the same exact-domain ownership as filing", async () => {
+test("address reports list every individual header address including own identities", async () => {
   const root = {id: "root", accountId: "work", name: "Work", specialUse: []};
   const customerRoot = {id: "customers", accountId: "work", name: "Customers", specialUse: []};
   const hitachiFolder = {id: "hitachi", accountId: "work", name: "Hitachi", specialUse: []};
@@ -431,11 +432,16 @@ test("address reports use the same exact-domain ownership as filing", async () =
   root.subFolders = [customerRoot];
   customerRoot.subFolders = [hitachiFolder, railFolder];
   const messages = [header(1, railFolder, {
-    author: "Rail <owner@rail.hitachi.com>",
+    author: "Rail <owner@rail.hitachi.com>, Duplicate <OWNER@RAIL.HITACHI.COM>",
     recipients: [
       "Deep Rail <engineer@team.rail.hitachi.com>",
-      "Parent <person@unknown.hitachi.com>"
-    ]
+      "Parent <person@unknown.hitachi.com>",
+      "Me <me@google.com>"
+    ],
+    ccList: ["Outside <person@unrelated.example>"]
+  }), header(2, railFolder, {
+    author: "Rail <owner@rail.hitachi.com>",
+    bccList: ["Outside <person@unrelated.example>"]
   })];
   const rules = config({
     customers: [
@@ -463,7 +469,12 @@ test("address reports use the same exact-domain ownership as filing", async () =
   });
   const api = {
     mailTabs: {query: async () => [{displayedFolder: railFolder}]},
-    accounts: {get: async () => ({id: "work", name: "Work", rootFolder: root})},
+    accounts: {get: async () => ({
+      id: "work",
+      name: "Work",
+      rootFolder: root,
+      identities: [{email: "ME@google.com"}]
+    })},
     folders: {
       getSubFolders: async folderId => {
         if (folderId === root.id) return [customerRoot];
@@ -474,17 +485,111 @@ test("address reports use the same exact-domain ownership as filing", async () =
     messages: {query: async () => ({id: null, messages})},
     messengerUtilities: {
       parseMailboxString: async value => {
-        const match = String(value).match(/[\w.+-]+@[\w.-]+/u);
-        return match ? [{email: match[0]}] : [];
+        return [...String(value).matchAll(/[\w.+-]+@[\w.-]+/gu)]
+          .map(match => ({email: match[0]}));
       }
     }
   };
 
   const report = await buildAddressReport({accountId: "work", days: 7}, rules, api);
 
-  assert.deepEqual(report.addresses.map(item => item.address), [
-    "owner@rail.hitachi.com"
+  assert.equal(report.title, "Customer Contacts List — Work / Rail");
+  assert.deepEqual(report.addresses, [
+    {address: "owner@rail.hitachi.com", count: 2},
+    {address: "person@unrelated.example", count: 2},
+    {address: "engineer@team.rail.hitachi.com", count: 1},
+    {address: "me@google.com", count: 1},
+    {address: "person@unknown.hitachi.com", count: 1}
   ]);
+  assert.equal(report.scanned, 2);
+  assert.equal(report.truncated, false);
+});
+
+test("address reports scan all dates and pages without a preview cap or body reads", async () => {
+  const root = {id: "root", accountId: "work", name: "Work", specialUse: []};
+  const customerRoot = {id: "customers", accountId: "work", name: "Customers", specialUse: []};
+  const customerFolder = {id: "acme", accountId: "work", name: "Acme", specialUse: []};
+  root.subFolders = [customerRoot];
+  customerRoot.subFolders = [customerFolder];
+  const firstPage = Array.from({length: 1_000}, (_, index) => header(index + 1, customerFolder, {
+    date: new Date("2020-01-01T00:00:00Z"),
+    author: "Customer <person@any-domain.example>",
+    recipients: ["Me <me@google.com>"]
+  }));
+  const secondPage = Array.from({length: 37}, (_, index) => header(index + 1_001, customerFolder, {
+    date: new Date("2010-01-01T00:00:00Z"),
+    author: "Customer <person@any-domain.example>"
+  }));
+  let queryInfo = null;
+  let continued = 0;
+  let bodyReads = 0;
+  const api = {
+    mailTabs: {query: async () => [{displayedFolder: customerFolder}]},
+    accounts: {get: async () => ({
+      id: "work",
+      name: "Work",
+      rootFolder: root,
+      identities: [{email: "me@google.com"}]
+    })},
+    folders: {
+      getSubFolders: async folderId => {
+        if (folderId === root.id) return [customerRoot];
+        if (folderId === customerRoot.id) return [customerFolder];
+        return [];
+      }
+    },
+    messages: {
+      query: async info => {
+        queryInfo = info;
+        return {id: "next-page", messages: firstPage};
+      },
+      continueList: async id => {
+        assert.equal(id, "next-page");
+        continued += 1;
+        return {id: null, messages: secondPage};
+      },
+      abortList: async () => {},
+      listInlineTextParts: async () => {
+        bodyReads += 1;
+        throw new Error("Address reports must not read message bodies");
+      }
+    },
+    messengerUtilities: {
+      parseMailboxString: async value => [...String(value).matchAll(/[\w.+-]+@[\w.-]+/gu)]
+        .map(match => ({email: match[0]}))
+    }
+  };
+  const rules = config({
+    maxMessagesPerRun: 1,
+    customers: [{
+      id: "acme",
+      name: "Acme",
+      folderName: "Acme",
+      enabled: true,
+      accountIds: [],
+      domains: ["acme.com"],
+      addresses: [],
+      keywords: []
+    }]
+  });
+
+  const report = await buildAddressReport({accountId: "work", days: 7}, rules, api);
+
+  assert.deepEqual(queryInfo, {
+    folderId: "acme",
+    includeSubFolders: false,
+    messagesPerPage: 100,
+    autoPaginationTimeout: 500
+  });
+  assert.equal(continued, 1);
+  assert.equal(bodyReads, 0);
+  assert.equal(report.scanned, 1_037);
+  assert.equal(report.scanComplete, true);
+  assert.equal(report.truncated, false);
+  assert.deepEqual(report.addresses, [
+    {address: "me@google.com", count: 1_000},
+    {address: "person@any-domain.example", count: 1_037}
+  ].sort((left, right) => right.count - left.count || left.address.localeCompare(right.address)));
 });
 
 test("bulk organize plans stop at the action limit and resume after previously examined occurrences", async () => {

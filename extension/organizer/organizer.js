@@ -87,6 +87,13 @@ function remainingActionCount() {
 
 function renderSummary() {
   const state = scanState();
+  if (plan.kind === "addresses") {
+    elements.summary.replaceChildren(
+      summaryCard("Messages scanned", plan.scanned),
+      summaryCard("Unique addresses", plan.addresses?.length)
+    );
+    return;
+  }
   const scanned = state.isBulk ? state.examined : plan.summary.total;
   elements.summary.replaceChildren(
     summaryCard(state.isBulk ? "Examined this batch" : "Scanned", scanned),
@@ -137,11 +144,6 @@ function renderScanNotice() {
     return;
   }
 
-  if (plan.kind === "addresses" && (state.stopReason || plan.truncated)) {
-    notice.textContent = "This address report reached its message limit. Narrow the time window and run it again to inspect additional mail.";
-    notice.className = "banner warning";
-    return;
-  }
   if (["action-limit", "action-cap", "batch-full"].includes(state.stopReason)) {
     notice.textContent = `This preview reached its action limit after examining ${formatCount(state.examined)} messages. Apply this batch, then create a fresh preview to continue.`;
     notice.className = "banner warning";
@@ -206,7 +208,7 @@ function renderAddresses() {
   if (!plan.addresses.length) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "No matching customer addresses were found in this time window.";
+    empty.textContent = "No email addresses were found in this folder's message headers.";
     elements.addressList.append(empty);
     elements.copyAddresses.disabled = true;
     return;
@@ -405,7 +407,7 @@ async function createNextBatch() {
   try {
     const response = await send("createNextBulkPlan", {planId: plan.id});
     if (!response?.planId) {
-      throw new Error("The next batch could not be created. Start a new entire-Inbox run from the toolbar.");
+      throw new Error("The next batch could not be created. Start a new entire-Inbox run from Settings.");
     }
     location.replace(
       messenger.runtime.getURL(`organizer/organizer.html?plan=${encodeURIComponent(response.planId)}`)

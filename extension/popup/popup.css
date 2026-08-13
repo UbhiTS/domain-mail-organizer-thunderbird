@@ -59,16 +59,12 @@ button:disabled { opacity: .55; cursor: wait; }
 button.primary { color: white; background: var(--blue); border-color: var(--blue); }
 button.primary:hover:not(:disabled) { background: var(--blue-hover); }
 button.warning { background: var(--warning); }
-.bulk-action {
-  grid-column: 1 / -1;
+.wide-action {
   display: grid;
-  gap: 2px;
-  margin-top: 4px;
-  border-color: var(--blue);
-  text-align: left;
+  gap: 3px;
+  grid-column: 1 / -1;
 }
-.bulk-action strong, .bulk-action small { display: block; }
-.bulk-action small { color: var(--muted); font-size: 11px; }
+.wide-action small { color: var(--muted); font-size: 11px; font-weight: 400; }
 #status { min-height: 22px; margin-top: 12px; color: var(--muted); font-size: 12px; white-space: pre-line; }
 #status.error { color: light-dark(#b3261e, #ffb4ab); }
 .notice, .last-run, .review-warning { padding: 10px; margin-bottom: 12px; border-radius: 7px; background: var(--subtle); font-size: 12px; }

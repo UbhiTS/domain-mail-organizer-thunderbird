@@ -22,11 +22,11 @@ That is the original Outlook precedence, with one safety improvement: if a singl
 - Multiple-account support with a separate customer tree in each account.
 - `1 Day`, `2 Days`, `7 Days`, `30 Days`, and `All` scan windows.
 - Read-only previews for Inbox processing, organizer-archive recovery, and bulk Inbox staging.
-- A resumable **Process entire Inbox** workflow for large existing Inboxes, including mail older than 30 days. It advances through safe review batches instead of repeating the same first batch.
+- A resumable **Process entire Inbox** workflow in Settings for large existing Inboxes, including mail older than 30 days. It advances through safe review batches instead of repeating the same first batch.
 - Preview rows are displayed newest first.
 - Starred-message protection.
 - Exact, boundary-safe domain matching alongside exact-address, subject, body, and keyword matching. A domain rule never includes its subdomains unless they are configured separately.
-- A frequency-sorted address report for the selected customer folder, copied as a semicolon-separated list.
+- A read-only **Customer Contacts List** for the selected direct customer folder. It scans every message-header page across all dates and lists every available normalized From/To/Cc/Bcc address, frequency-sorted and ready to copy as a semicolon-separated list.
 - Optional sender/recipient-only automatic filing for new Inbox mail after customer folders have been set up.
 - Automatic contact capture paired with automatic filing: after a matched move, customer-owned From/To/Cc/Bcc addresses are added to a dedicated local address book for that account, with exact global deduplication across all address books.
 - A user-triggered **Build address books from existing mail** action in Settings. It reads every message-header page in the enabled account's configured customer folder trees, regardless of date or message count, and imports the same exact customer-owned addresses without moving mail.
@@ -77,7 +77,7 @@ The XPI is unsigned. It can be used for local development/testing where Thunderb
    - Optional exact addresses for shared providers such as Gmail.
    - Optional project/customer keywords.
 7. Select **Save & set up folders**. Adoption consent is one-use and must exactly match the configured name. Setup also creates one uniquely named managed local address book per enabled account, using its identity and Thunderbird account-ID suffix (for example, `Customer Contacts — you@example.com (account1)`). An existing address book with that exact name is not silently adopted or overwritten; resolve the collision and run setup again.
-8. Use the toolbar button to **Preview Inbox** for a normal date-window batch, or **Process entire Inbox** to scan all dates in resumable batches.
+8. Use **Process Inbox** in the toolbar popup for a normal date-window batch. For a full all-date run, open Settings and choose **Process entire Inbox** under **Mail processing tools**.
 9. Review each proposed destination and deselect anything you do not want to move.
 10. Select **Apply selected actions**.
 11. After folder setup, we recommend testing one preview and Apply before optionally enabling automatic Inbox filing in Settings. Automatic filing also enables automatic contact capture for those moves; there is no separate contact-mining mode.
@@ -93,10 +93,10 @@ Folder setup will not silently adopt an existing customer root or organizer arch
 |---|---|
 | `Domains/<domain>` folders | Configurable account-local `Customers/<customer>` folders |
 | Folder Description stores comma-separated keywords | Keywords are stored in extension settings |
-| Process Inbox | Read-only Inbox preview, then explicit Apply |
-| Process Archive | Scans the dedicated account-local `Organizer Archive` folder |
+| Process Inbox | **Process Inbox** creates a read-only date-window review, then Apply performs only selected moves |
+| Process Archive | **Recover from Organizer Archive** in Settings scans the dedicated account-local `Organizer Archive` folder |
 | Archive Mails | Previews unstarred Inbox messages, then moves only the selected batch to `Organizer Archive` |
-| List Emails | Reports addresses owned by the selected customer's exact domain/address rules |
+| List Emails | **Customer Contacts List** exhaustively reports every available From/To/Cc/Bcc address in the selected direct customer folder |
 | Flagged mail is protected | Starred mail is protected by default |
 | Hidden MAPI property moves newest folder to top | No stable Thunderbird folder-order API; not emulated by renaming or moving folders |
 
@@ -117,6 +117,7 @@ The dedicated organizer archive is intentional. Thunderbird maps Gmail's native 
 - **Save & set up folders** creates one uniquely named managed local address book per enabled account. Setup fails safely if an unrelated address book already has that exact name; the extension never silently adopts, clears, or overwrites it.
 - After a matched automatic move is accepted, contact capture considers only From, To, Cc, and Bcc addresses that exactly match that customer's configured domain or exact-address rules. It excludes the account's own identities and never mines the subject or message body for contacts.
 - Contact email matching and deduplication are exact after normalization. Before adding a contact, the extension checks every readable address book; it never updates, merges, or deletes an existing contact.
+- **Customer Contacts List** is separate from address-book capture. It is read-only, scans the selected direct customer folder only (not descendants), exhausts every date and page without the preview limit, and lists all available normalized From/To/Cc/Bcc addresses, including the account's own identities and unrelated domains. It never reads bodies or writes contacts.
 - The Settings backfill action scans all dates and exhausts Thunderbird's paginated message-header lists for each configured direct customer folder and its descendants in each enabled account. Unrelated siblings beneath the customer root are not scanned. It has no 1,000-message preview cap, so a folder tree with 4,000 or more messages is processed to completion. It reads only From, To, Cc, and Bcc headers; it never fetches message bodies, moves messages, or creates/renames/deletes folders.
 - Backfill requires the approved customer root and the managed address book created by **Save & set up folders**. Missing configured customer folders are skipped and reported; an unavailable or unapproved root fails closed. Existing email addresses are checked once globally across all address books, and rerunning the action is safe because exact duplicates are not recreated.
 - Previews, reviewed Apply actions, manual Thunderbird moves, and mail already present in a customer folder do not add contacts. If the managed address book is missing, renamed, or no longer writable, automatic filing and contact capture pause together until setup is repaired.
@@ -125,7 +126,7 @@ The dedicated organizer archive is intentional. Thunderbird maps Gmail's native 
 - Cross-account automatic moves are prohibited.
 - Junk, external/file messages, and messages below Trash, Junk, Drafts, Templates, or Outbox are excluded.
 - Message scans are paginated and work-bounded. A preview stores up to the configured limit (up to 1,000 rows), examines at most five times that limit (capped at 5,000 headers), prioritizes actionable messages over diagnostic rows, and can be narrowed or rerun after Apply.
-- **Process entire Inbox** keeps session-local occurrence progress for every examined message. Select and Apply a reviewed batch, then choose **Preview batch N+1**. A 4,000-message Inbox with 4,000 matches is handled as four batches of up to 1,000 actions plus a final verification scan. A batch with only unmatched, ambiguous, or protected mail can still advance to later messages.
+- **Process entire Inbox** in Settings keeps session-local occurrence progress for every examined message. Select and Apply a reviewed batch, then choose **Preview batch N+1**. A 4,000-message Inbox with 4,000 matches is handled as four batches of up to 1,000 actions plus a final verification scan. A batch with only unmatched, ambiguous, or protected mail can still advance to later messages.
 - Body text is capped at 500,000 characters per message during matching and is off by default.
 - Domains are exact and boundary-safe: `shutterfly.com`, `em.shutterfly.com`, and `notshutterfly.com` are three different domains. A rule for `shutterfly.com` matches only that domain; mail from `em.shutterfly.com` stays unmatched unless that subdomain is configured separately.
 - Sister companies and subdomains route independently. For example, configure `hitachi.com`, `hal.hitachi.com`, `rail.hitachi.com`, and `cyber.hitachi.com` explicitly for their respective customer folders.

@@ -4,8 +4,6 @@ const elements = {
   account: document.querySelector("#account"),
   days: document.querySelector("#days"),
   inbox: document.querySelector("#inbox"),
-  bulkInbox: document.querySelector("#bulkInbox"),
-  archive: document.querySelector("#archive"),
   archiveMail: document.querySelector("#archiveMail"),
   addresses: document.querySelector("#addresses"),
   settings: document.querySelector("#settings"),
@@ -96,8 +94,6 @@ function updateReadiness() {
   elements.setupNotice.classList.toggle("hidden", ready);
   for (const button of [
     elements.inbox,
-    elements.bulkInbox,
-    elements.archive,
     elements.archiveMail,
     elements.addresses
   ]) {
@@ -124,23 +120,9 @@ async function createAndOpenPlan(kind, source, forceAll = false) {
   }
 }
 
-async function createAndOpenBulkPlan() {
-  setBusy(true);
-  setStatus("Scanning the entire Inbox for the first read-only batch…");
-  try {
-    await send("createAndOpenBulkPlan", {accountId: elements.account.value});
-    window.close();
-  } catch (error) {
-    setStatus(error.message, true);
-    setBusy(false);
-  }
-}
-
 elements.inbox.addEventListener("click", () => createAndOpenPlan("organize", "inbox"));
-elements.bulkInbox.addEventListener("click", createAndOpenBulkPlan);
-elements.archive.addEventListener("click", () => createAndOpenPlan("organize", "archive"));
 elements.archiveMail.addEventListener("click", () => createAndOpenPlan("archive", "inbox", true));
-elements.addresses.addEventListener("click", () => createAndOpenPlan("addresses", "current"));
+elements.addresses.addEventListener("click", () => createAndOpenPlan("addresses", "current", true));
 elements.settings.addEventListener("click", async () => {
   await send("openSettings");
   window.close();

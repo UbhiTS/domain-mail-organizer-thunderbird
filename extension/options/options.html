@@ -48,6 +48,42 @@
         <div id="accounts" class="account-grid"></div>
       </section>
 
+      <section id="manualToolsPanel" class="panel" aria-labelledby="manualToolsTitle">
+        <div class="section-heading">
+          <div>
+            <h2 id="manualToolsTitle">Mail processing tools</h2>
+            <p>Process an entire Inbox in safe review batches, or recover customer mail from the Organizer Archive. These tools use your saved customer rules.</p>
+          </div>
+        </div>
+        <div class="manual-tools-grid">
+          <label class="field">
+            <span>Mail account</span>
+            <select id="manualAccount"></select>
+          </label>
+          <label class="field">
+            <span>Recovery time window</span>
+            <select id="manualDays">
+              <option value="1">1 Day</option>
+              <option value="2">2 Days</option>
+              <option value="7">7 Days</option>
+              <option value="30">30 Days</option>
+              <option value="0">All dates</option>
+            </select>
+          </label>
+        </div>
+        <p id="manualToolsNotice" class="muted hidden">Enable a mail account and add at least one customer before using these tools.</p>
+        <div class="manual-tool-actions" aria-label="Mail processing tools">
+          <button id="processEntireInbox" class="primary descriptive-action" type="button" aria-controls="status">
+            <strong>Process entire Inbox</strong>
+            <small>All dates; review and apply customer moves in safe batches</small>
+          </button>
+          <button id="recoverArchive" class="secondary descriptive-action" type="button" aria-controls="status">
+            <strong>Recover from Organizer Archive</strong>
+            <small>Review archived mail and return matches to customer folders</small>
+          </button>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="section-heading">
           <div>

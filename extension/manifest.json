@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Domain Mail Organizer",
   "description": "Organize customer email into account-local folders and capture customer contacts automatically.",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "author": "Tarun Ubhi (UbhiTS)",
   "browser_specific_settings": {
     "gecko": {

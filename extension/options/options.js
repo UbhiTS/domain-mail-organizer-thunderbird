@@ -19,6 +19,12 @@ const elements = {
   setupFolders: document.querySelector("#setupFolders"),
   buildAddressBooks: document.querySelector("#buildAddressBooks"),
   mailAccountsPanel: document.querySelector("#mailAccountsPanel"),
+  manualToolsPanel: document.querySelector("#manualToolsPanel"),
+  manualAccount: document.querySelector("#manualAccount"),
+  manualDays: document.querySelector("#manualDays"),
+  manualToolsNotice: document.querySelector("#manualToolsNotice"),
+  processEntireInbox: document.querySelector("#processEntireInbox"),
+  recoverArchive: document.querySelector("#recoverArchive"),
   export: document.querySelector("#export"),
   import: document.querySelector("#import"),
   importFile: document.querySelector("#importFile"),
@@ -88,6 +94,7 @@ function setBusy(busy) {
   for (const button of document.querySelectorAll("button")) {
     button.disabled = busy;
   }
+  if (!busy) updateManualToolsReadiness();
 }
 
 function numeric(value) {
@@ -214,6 +221,41 @@ function accountConfig(accountId) {
     autoFileIncoming: false,
     autoFileSince: null
   };
+}
+
+function updateManualToolsReadiness() {
+  const accountId = elements.manualAccount.value;
+  const ready = Boolean(accountId) && config.customers.some(customer =>
+    customer.enabled && (!customer.accountIds.length || customer.accountIds.includes(accountId))
+  );
+  elements.processEntireInbox.disabled = !ready;
+  elements.recoverArchive.disabled = !ready;
+  elements.manualToolsNotice.classList.toggle("hidden", ready);
+}
+
+function renderManualTools() {
+  const selectedAccountId = elements.manualAccount.value;
+  elements.manualAccount.replaceChildren();
+  const enabledAccounts = bootstrap.accounts.filter(account => accountConfig(account.id).enabled);
+  for (const account of enabledAccounts) {
+    const option = document.createElement("option");
+    option.value = account.id;
+    const identity = account.identities.find(candidate => candidate.email)?.email;
+    option.textContent = identity ? `${account.name} — ${identity}` : account.name;
+    elements.manualAccount.append(option);
+  }
+  if (!enabledAccounts.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No enabled mail accounts";
+    elements.manualAccount.append(option);
+  }
+  elements.manualAccount.disabled = !enabledAccounts.length;
+  if (enabledAccounts.some(account => account.id === selectedAccountId)) {
+    elements.manualAccount.value = selectedAccountId;
+  }
+  elements.manualDays.value = String(config.defaultDays);
+  updateManualToolsReadiness();
 }
 
 function renderFolderApproval(card, kind, ready) {
@@ -577,6 +619,7 @@ function appendCustomer(
 
 function render() {
   renderAccounts();
+  renderManualTools();
   elements.customers.replaceChildren();
   for (const customer of customersByName(config.customers)) {
     appendCustomer(customer);
@@ -644,6 +687,7 @@ async function saveSettings(quiet = false) {
     const response = await send("saveConfig", {config: raw});
     config = response.config;
     renderAccounts();
+    renderManualTools();
     if (!quiet) {
       const automaticAccounts = Object.values(config.accounts).filter(
         account => account.enabled && account.autoFileIncoming
@@ -651,7 +695,7 @@ async function saveSettings(quiet = false) {
       showStatus(
         automaticAccounts
           ? `Settings saved. Automatic Inbox filing is active for ${automaticAccounts} account${automaticAccounts === 1 ? "" : "s"}.`
-          : "Settings saved. Create a preview from the toolbar before applying manual moves."
+          : "Settings saved. Use Process Inbox in the toolbar popup or the processing tools here for manual review."
       );
     }
     return true;
@@ -674,6 +718,42 @@ elements.folderImportDialog.addEventListener("close", () => {
   showFolderImportStatus();
 });
 elements.save.addEventListener("click", () => saveSettings());
+elements.manualAccount.addEventListener("change", updateManualToolsReadiness);
+elements.processEntireInbox.addEventListener("click", async () => {
+  setBusy(true);
+  elements.manualToolsPanel.setAttribute("aria-busy", "true");
+  showProgress("Scanning the entire Inbox for the first read-only batch…");
+  try {
+    await send("createAndOpenBulkPlan", {accountId: elements.manualAccount.value});
+    showStatus("The first entire-Inbox review batch is open in a new tab.");
+  } catch (error) {
+    showStatus(error.message, true);
+  } finally {
+    elements.manualToolsPanel.removeAttribute("aria-busy");
+    setBusy(false);
+  }
+});
+elements.recoverArchive.addEventListener("click", async () => {
+  setBusy(true);
+  elements.manualToolsPanel.setAttribute("aria-busy", "true");
+  showProgress("Building a read-only Organizer Archive recovery review…");
+  try {
+    await send("createAndOpenPlan", {
+      request: {
+        kind: "organize",
+        source: "archive",
+        accountId: elements.manualAccount.value,
+        days: Number(elements.manualDays.value)
+      }
+    });
+    showStatus("The Organizer Archive recovery review is open in a new tab.");
+  } catch (error) {
+    showStatus(error.message, true);
+  } finally {
+    elements.manualToolsPanel.removeAttribute("aria-busy");
+    setBusy(false);
+  }
+});
 elements.buildAddressBooks.addEventListener("click", async () => {
   const confirmed = window.confirm(
     "Build address books from existing mail?\n\n" +
@@ -717,6 +797,7 @@ elements.setupFolders.addEventListener("click", async () => {
       delete bootstrap.managedContactBookErrors[contactBook.accountId];
     }
     renderAccounts();
+    renderManualTools();
     const details = result.result.errors.length
       ? `\n${result.result.errors.join("\n")}`
       : "";

@@ -392,8 +392,11 @@ async function storePlan(plan) {
       [planStorageKey(plan.id)]: plan
     });
   } catch (error) {
+    const guidance = plan.kind === "addresses"
+      ? "Open a more specific direct customer folder and try again"
+      : "Lower “Maximum messages per preview” in Settings and try again";
     throw new Error(
-      `The preview was too large for Thunderbird's temporary storage. Lower “Maximum messages per preview” in Settings and try again. (${error.message})`
+      `The preview was too large for Thunderbird's temporary storage. ${guidance}. (${error.message})`
     );
   }
   if (previousId && previousId !== plan.id) {
@@ -407,7 +410,7 @@ async function getPlan(planId) {
   const stored = await messenger.storage.session.get(key);
   const plan = stored[key];
   if (!plan) {
-    throw new Error("This preview expired. Create a new preview from the toolbar.");
+    throw new Error("This preview expired. Start the action again.");
   }
   return plan;
 }
@@ -497,14 +500,14 @@ async function createPlan(request) {
 
 async function loadBulkSession(sessionId) {
   if (!sessionId) {
-    throw new Error("This entire-Inbox run expired. Start a new run from the toolbar.");
+    throw new Error("This entire-Inbox run expired. Start a new run from Settings.");
   }
   const key = bulkSessionStorageKey(sessionId);
   const stored = await messenger.storage.session.get(key);
   const session = stored[key];
   const errors = validateBulkReviewSession(session);
   if (errors.length) {
-    throw new Error(`${errors.join("; ")} Start a new entire-Inbox run from the toolbar.`);
+    throw new Error(`${errors.join("; ")} Start a new entire-Inbox run from Settings.`);
   }
   return session;
 }

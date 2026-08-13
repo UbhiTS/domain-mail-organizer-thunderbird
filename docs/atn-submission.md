@@ -1,9 +1,9 @@
 # Thunderbird Add-ons submission notes
 
-Use this checklist when submitting version 0.1.10 to addons.thunderbird.net
+Use this checklist when submitting version 0.1.11 to addons.thunderbird.net
 (ATN).
 
-Before pasting the reviewer links below, manually create/push the `v0.1.10` tag
+Before pasting the reviewer links below, manually create/push the `v0.1.11` tag
 or publish the corresponding GitHub Release so the source snapshot exists.
 
 ## Validation screen
@@ -31,7 +31,12 @@ Paste the following into **Version notes**:
 > A user-triggered Settings action can build the managed address book from all
 > existing mail in configured customer folders and their subfolders. It scans
 > every paginated header regardless of date or count, changes no messages or
-> folders, and is repeat-safe. This version also preserves exact domain
+> folders, and is repeat-safe. The toolbar's read-only Customer Contacts List
+> separately scans every date/page in the selected direct customer folder and
+> lists all available From/To/Cc/Bcc addresses without body access or contact
+> writes. Process entire Inbox and archive recovery now live in Settings;
+> Process Inbox, Archive Mails, and Customer Contacts List remain in the popup.
+> This version also preserves exact domain
 > behavior: shutterfly.com does not include em.shutterfly.com
 > unless that subdomain is configured separately. All processing remains local,
 > with no telemetry, advertising, remote code, external service, or host/network
@@ -51,7 +56,7 @@ Paste the following into **Notes for Reviewers**:
 >
 > Source repository and tag:
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.10
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.11
 >
 > The packaged JavaScript, HTML, and CSS are readable source files. There is no
 > minification, transpilation, bundling, obfuscation, eval, remote code, or
@@ -62,7 +67,7 @@ Paste the following into **Notes for Reviewers**:
 > 1. npm ci --ignore-scripts
 > 2. npm run check
 > 3. npm run build
-> Output: artifacts/domain-mail-organizer-0.1.10.xpi and .zip.
+> Output: artifacts/domain-mail-organizer-0.1.11.xpi and .zip.
 >
 > Third-party library: psl 1.15.0, vendored unmodified as
 > extension/vendor/psl.mjs. Source:
@@ -93,7 +98,7 @@ Paste the following into **Notes for Reviewers**:
 >    set up folders. Confirm a uniquely named local `Customer Contacts — …` address book
 >    is also created; an unrelated exact-name collision is refused rather than
 >    adopted or overwritten.
-> 4. Preview Inbox or selected test messages. Preview itself creates/moves
+> 4. Choose Process Inbox or preview selected test messages. Preview itself creates/moves
 >    nothing; select Apply to perform proposed moves.
 > 5. Verify person@example.com matches and person@mail.example.com remains
 >    unmatched unless mail.example.com is explicitly configured.
@@ -110,12 +115,18 @@ Paste the following into **Notes for Reviewers**:
 >    From/To/Cc/Bcc addresses
 >    without reading bodies or changing messages/folders. Run it again and
 >    confirm no exact-email duplicate is created.
+> 9. Select a direct customer folder and choose Customer Contacts List in the
+>    toolbar popup. Confirm messages across all dates/pages are read and all
+>    available From/To/Cc/Bcc addresses are listed, including own or unrelated
+>    addresses, without reading bodies or writing contacts.
+> 10. Confirm Process entire Inbox and Recover from Organizer Archive appear
+>    under Mail processing tools in Settings rather than in the toolbar popup.
 >
 > All processing is local. The extension makes no host/network requests and
 > transmits no mailbox data or telemetry. It never updates, merges, or deletes
 > existing contacts. Managed books and contacts remain user-owned after the
 > feature is disabled or the extension is uninstalled. Privacy statement:
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.10/PRIVACY.md
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.11/PRIVACY.md
 
 ## Source-code upload field
 
@@ -123,7 +134,7 @@ The submitted XPI contains readable, unminified source and does not transform
 the runtime code, so a separate source upload is generally unnecessary. If ATN
 requests one, use the repository tag archive—not the installable release ZIP:
 
-https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.10.zip
+https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.11.zip
 
 The archive contains `package.json`, `package-lock.json`, the build script, and
 all extension sources required to reproduce the XPI.
