@@ -1,0 +1,63 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License. -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Domain Mail Organizer</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <img src="../icons/icon.svg" alt="">
+      <div>
+        <h1>Domain Mail Organizer</h1>
+        <p>Customer mail, without the noisy Inbox.</p>
+      </div>
+    </header>
+
+    <main>
+      <div id="setupNotice" class="notice hidden">
+        Enable a mail account and add at least one customer before creating a preview.
+      </div>
+
+      <label class="field">
+        <span>Mail account</span>
+        <select id="account"></select>
+      </label>
+
+      <label class="field">
+        <span>Time window</span>
+        <select id="days">
+          <option value="1">1 Day</option>
+          <option value="2">2 Days</option>
+          <option value="7">7 Days</option>
+          <option value="30">30 Days</option>
+          <option value="0">All dates (one preview batch)</option>
+        </select>
+      </label>
+
+      <section aria-label="Organizer actions" class="actions">
+        <button id="inbox" class="primary">Preview Inbox</button>
+        <button id="archive">Recover from Organizer Archive</button>
+        <button id="archiveMail" class="warning">Preview Inbox → Organizer Archive (all dates)</button>
+        <button id="addresses">Addresses in current customer folder</button>
+        <button id="bulkInbox" class="bulk-action">
+          <strong>Process entire Inbox</strong>
+          <small>All dates; preview and apply customer moves in safe batches</small>
+        </button>
+      </section>
+
+      <div id="status" role="status" aria-live="polite"></div>
+
+      <section id="lastRun" class="last-run hidden" aria-label="Last run"></section>
+      <section id="automaticReviews" class="review-warning hidden" aria-label="Automatic messages awaiting review"></section>
+    </main>
+
+    <footer>
+      <button id="settings" class="link-button">Settings &amp; customer rules</button>
+    </footer>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

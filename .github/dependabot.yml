@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
+# SPDX-License-Identifier: MIT
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Domain Mail Organizer",
+  "description": "Organize customer email into account-local folders using domains, addresses, and keywords.",
+  "version": "0.1.8",
+  "author": "Tarun Ubhi (UbhiTS)",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ubhits.domain-mail-organizer@addons.thunderbird.net",
+      "strict_min_version": "140.0"
+    }
+  },
+  "icons": {
+    "16": "icons/icon.svg",
+    "32": "icons/icon.svg",
+    "64": "icons/icon.svg"
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Domain Mail Organizer",
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/icon.svg"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "permissions": [
+    "accountsRead",
+    "accountsFolders",
+    "messagesRead",
+    "messagesMove",
+    "storage",
+    "menus",
+    "alarms"
+  ]
+}

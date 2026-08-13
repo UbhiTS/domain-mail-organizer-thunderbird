@@ -1,0 +1,9 @@
+Domain Mail Organizer for Thunderbird
+Copyright (c) 2026 Tarun Ubhi (UbhiTS)
+
+This project is licensed under the MIT License. The copyright and permission
+notice in LICENSE must be retained in copies or substantial portions of the
+software.
+
+The vendored Public Suffix List parser in extension/vendor is separately
+attributed and licensed in VENDOR.md and extension/vendor/PSL-LICENSE.txt.

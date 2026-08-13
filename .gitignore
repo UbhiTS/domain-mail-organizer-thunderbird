@@ -1,0 +1,17 @@
+node_modules/
+artifacts/
+web-ext-artifacts/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+coverage/
+.nyc_output/
+.eslintcache
+.idea/
+.vscode/
+*.pem
+*.key
+*.p12

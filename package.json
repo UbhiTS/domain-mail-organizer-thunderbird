@@ -1,0 +1,28 @@
+{
+  "name": "domain-mail-organizer-thunderbird",
+  "version": "0.1.8",
+  "private": true,
+  "type": "module",
+  "description": "A Thunderbird MailExtension that organizes customer email by domain, address, and keyword.",
+  "author": "Tarun Ubhi (UbhiTS)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UbhiTS/domain-mail-organizer-thunderbird.git"
+  },
+  "bugs": {
+    "url": "https://github.com/UbhiTS/domain-mail-organizer-thunderbird/issues"
+  },
+  "homepage": "https://github.com/UbhiTS/domain-mail-organizer-thunderbird#readme",
+  "scripts": {
+    "test": "node --test",
+    "check:syntax": "node scripts/check-syntax.js",
+    "lint": "web-ext lint --source-dir extension",
+    "check": "npm run check:syntax && npm test && npm run lint",
+    "build": "node scripts/build.js"
+  },
+  "devDependencies": {
+    "web-ext": "10.6.0",
+    "yazl": "3.3.1"
+  }
+}

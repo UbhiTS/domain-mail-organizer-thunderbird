@@ -1,0 +1,222 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License. -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Domain Mail Organizer Settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="brand">
+        <img src="../icons/icon.svg" alt="">
+        <div>
+          <p class="eyebrow">Thunderbird extension</p>
+          <h1>Domain Mail Organizer</h1>
+          <p class="muted">Configure customer rules separately for each work mailbox.</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="export" class="secondary">Export JSON</button>
+        <button id="import" class="secondary">Import JSON</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+        <button id="save" class="primary">Save settings</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="status" class="banner hidden" role="status" aria-live="polite"></div>
+
+      <section class="panel intro">
+        <h2>Safe by default</h2>
+        <p>Previews never move messages or create folders. Setup and explicit Apply actions can create folders. An existing root or archive folder is used only when you approve that exact name below. After setup, automatic filing can recreate a missing configured customer child, but never an unapproved or missing customer root. Starred messages remain protected by default.</p>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Mail accounts</h2>
+            <p>Each enabled account gets its own customer-folder tree; automatic moves never cross accounts.</p>
+          </div>
+          <button id="setupFolders" class="secondary">Save &amp; set up folders</button>
+        </div>
+        <div id="accounts" class="account-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Customer rules</h2>
+            <p>Customers open collapsed and sorted by name. Expand a customer to edit its rules. Domain matching is exact: shutterfly.com does not match em.shutterfly.com. Add each domain or subdomain you want to match, and never enter a public suffix such as co.uk.</p>
+          </div>
+          <button id="addCustomer" class="secondary">Add customer</button>
+        </div>
+        <div id="customers" class="customer-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Processing defaults</h2>
+        <div class="settings-grid">
+          <label class="field">
+            <span>Default time window</span>
+            <select id="defaultDays">
+              <option value="1">1 Day</option>
+              <option value="2">2 Days</option>
+              <option value="7">7 Days</option>
+              <option value="30">30 Days</option>
+              <option value="0">All</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Maximum messages per preview</span>
+            <input id="maxMessages" type="number" min="25" max="1000" step="25">
+          </label>
+          <label class="check-row">
+            <input id="scanSubject" type="checkbox">
+            <span><strong>Match subject</strong><small>Look for exact configured customer domains and keywords.</small></span>
+          </label>
+          <label class="check-row">
+            <input id="scanBody" type="checkbox">
+            <span><strong>Match message body</strong><small>Useful when colleagues reply to customer threads; may fetch IMAP content.</small></span>
+          </label>
+          <label class="check-row">
+            <input id="preserveFlagged" type="checkbox">
+            <span><strong>Protect starred messages</strong><small>Never move or archive messages marked with a star.</small></span>
+          </label>
+        </div>
+      </section>
+    </main>
+
+    <template id="accountTemplate">
+      <article class="account-card">
+        <label class="account-title check-row">
+          <input class="account-enabled" type="checkbox">
+          <span><strong class="account-name"></strong><small class="account-email"></small></span>
+        </label>
+        <div class="folder-setting">
+          <label class="field">
+            <span>Customer root folder</span>
+            <input class="root-folder" type="text" maxlength="80" placeholder="Customers">
+          </label>
+          <label class="check-row folder-approval root-approval">
+            <input class="adopt-root" type="checkbox">
+            <span>
+              <strong class="root-approval-title">Use an existing folder with this name</strong>
+              <small class="root-approval-help">One-time approval: its direct customer subfolders may receive organized mail. Existing messages are not changed during setup.</small>
+            </span>
+          </label>
+          <button class="import-customer-folders secondary" type="button">Import existing customer folders...</button>
+        </div>
+        <div class="folder-setting">
+          <label class="field">
+            <span>Organizer archive folder</span>
+            <input class="archive-folder" type="text" maxlength="80" placeholder="Organizer Archive">
+          </label>
+          <label class="check-row folder-approval archive-approval">
+            <input class="adopt-archive" type="checkbox">
+            <span>
+              <strong class="archive-approval-title">Use an existing folder with this name</strong>
+              <small class="archive-approval-help">One-time approval: future archive actions may move messages here. Setup changes nothing already inside; recovery will treat its current contents as organizer archive mail.</small>
+            </span>
+          </label>
+        </div>
+        <label class="check-row automation-row">
+          <input class="auto-file" type="checkbox">
+          <span><strong>Auto-file new Inbox mail</strong><small class="auto-file-help">Run folder setup first.</small></span>
+        </label>
+      </article>
+    </template>
+
+    <template id="customerTemplate">
+      <details class="customer-card">
+        <summary class="customer-summary">
+          <span class="customer-summary-content">
+            <span class="customer-summary-copy">
+              <strong class="customer-summary-name"></strong>
+              <span class="customer-summary-details"></span>
+            </span>
+            <span class="customer-summary-status"></span>
+          </span>
+        </summary>
+        <div class="customer-body">
+          <div class="customer-heading">
+            <label class="check-row compact">
+              <input class="customer-enabled" type="checkbox">
+              <span><strong>Enabled</strong></span>
+            </label>
+            <button class="remove-customer danger" type="button">Remove</button>
+          </div>
+          <div class="customer-grid">
+            <label class="field">
+              <span>Customer name</span>
+              <input class="customer-name" type="text" maxlength="80" placeholder="Acme Corp">
+            </label>
+            <label class="field">
+              <span>Folder name</span>
+              <input class="customer-folder" type="text" maxlength="80" placeholder="acme.com">
+            </label>
+            <label class="field full">
+              <span>Exact matching domains</span>
+              <textarea class="customer-domains" rows="2" placeholder="acme.com, acmecloud.io"></textarea>
+            </label>
+            <label class="field full">
+              <span>Exact email addresses (optional)</span>
+              <textarea class="customer-addresses" rows="2" placeholder="customer.contact@gmail.com"></textarea>
+            </label>
+            <label class="field full">
+              <span>Subject/body keywords (optional)</span>
+              <textarea class="customer-keywords" rows="2" placeholder="project hummingbird, billing migration"></textarea>
+            </label>
+            <fieldset class="account-scope full">
+              <legend>Accounts (none selected means all enabled accounts)</legend>
+              <div class="scope-options"></div>
+            </fieldset>
+          </div>
+        </div>
+      </details>
+    </template>
+
+    <dialog id="folderImportDialog" class="folder-import-dialog" aria-labelledby="folderImportTitle" aria-describedby="folderImportNotice">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="folderImportTitle">Import existing customer folders</h2>
+          <p id="folderImportDescription" class="muted"></p>
+        </div>
+        <button id="cancelFolderImportTop" class="icon-button" type="button" aria-label="Close">&times;</button>
+      </div>
+      <p id="folderImportNotice" class="dialog-notice">Choose folders and review their exact matching domains. Folders without a valid domain are added disabled and expanded for completion. Adding rules does not move mail, change folders, or approve the customer root. For a new setup, also approve the existing root in its account card and choose Save &amp; set up folders.</p>
+      <div id="folderImportStatus" class="inline-status hidden" role="status" aria-live="polite"></div>
+      <div id="folderImportList" class="folder-import-list"></div>
+      <div class="dialog-actions">
+        <button id="cancelFolderImport" class="secondary" type="button">Cancel</button>
+        <button id="addFolderImports" class="primary" type="button">Add selected for review</button>
+      </div>
+    </dialog>
+
+    <template id="folderImportTemplate">
+      <article class="folder-import-row">
+        <label class="folder-import-select">
+          <input class="folder-import-enabled" type="checkbox" checked>
+          <span>
+            <strong class="folder-import-name"></strong>
+            <small class="folder-import-state"></small>
+          </span>
+        </label>
+        <div class="folder-import-fields">
+          <label class="field">
+            <span>Customer name</span>
+            <input class="folder-import-customer-name" type="text" maxlength="80">
+          </label>
+          <label class="field">
+            <span>Exact matching domains</span>
+            <input class="folder-import-domains" type="text" placeholder="customer.example">
+          </label>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

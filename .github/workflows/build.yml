@@ -1,0 +1,98 @@
+# Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
+# SPDX-License-Identifier: MIT
+name: Build
+
+env:
+  NO_UPDATE_NOTIFIER: "1"
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Check syntax
+        run: npm run check:syntax
+
+      - name: Run tests
+        run: npm test
+
+      - name: Lint extension
+        run: npm run lint
+
+      - name: Build extension archives
+        run: npm run build
+
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          manifest_version="$(node -p "require('./extension/manifest.json').version")"
+          tag_version="${GITHUB_REF_NAME#v}"
+          test "$tag_version" = "$package_version"
+          test "$tag_version" = "$manifest_version"
+
+      - name: Create SHA-256 checksums
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum *.xpi *.zip > SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: domain-mail-organizer-${{ github.sha }}
+          path: |
+            artifacts/*.xpi
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: domain-mail-organizer-${{ github.sha }}
+          path: artifacts
+
+      - name: Publish release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" artifacts/*.xpi artifacts/*.zip artifacts/SHA256SUMS.txt --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" artifacts/*.xpi artifacts/*.zip artifacts/SHA256SUMS.txt \
+              --generate-notes --verify-tag
+          fi

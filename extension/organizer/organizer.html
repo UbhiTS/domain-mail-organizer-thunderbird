@@ -1,0 +1,76 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License. -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Domain Mail Organizer Preview</title>
+    <link rel="stylesheet" href="organizer.css">
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="brand">
+        <img src="../icons/icon.svg" alt="">
+        <div>
+          <p class="eyebrow">Domain Mail Organizer</p>
+          <h1 id="title">Loading preview…</h1>
+          <p id="description" class="muted"></p>
+        </div>
+      </div>
+      <button id="settings" class="secondary">Settings</button>
+    </header>
+
+    <main>
+      <div id="loading" class="loading">Loading the read-only plan…</div>
+      <div id="error" class="banner error hidden" role="alert"></div>
+      <div id="scanNotice" class="banner warning hidden" role="status" aria-live="polite">
+        The safety limit was reached. Actionable messages are prioritized; other results may be a sample. Apply this batch, then preview again to continue.
+      </div>
+
+      <section id="content" class="hidden">
+        <div id="summary" class="summary" aria-label="Preview summary"></div>
+
+        <div id="toolbar" class="toolbar">
+          <div class="toolbar-left">
+            <button id="selectAll" class="secondary">Select all actions</button>
+            <button id="selectNone" class="secondary">Select none</button>
+          </div>
+          <div class="toolbar-right">
+            <span id="selectionCount" class="muted"></span>
+            <button id="copyAddresses" class="primary hidden">Copy addresses</button>
+            <button id="nextBatch" class="primary hidden">Preview next batch</button>
+            <button id="apply" class="primary">Apply selected actions</button>
+          </div>
+        </div>
+
+        <div id="progress" class="progress hidden" role="status" aria-live="polite">
+          <progress id="progressBar" max="1" value="0"></progress>
+          <span id="progressText"></span>
+        </div>
+
+        <div id="result" class="banner hidden" role="status"></div>
+
+        <div class="table-shell">
+          <table id="planTable" aria-label="Message organization preview">
+            <thead>
+              <tr>
+                <th class="check-column"><span class="sr-only">Apply</span></th>
+                <th aria-sort="descending" title="Newest first">Date ↓</th>
+                <th>Source</th>
+                <th>Correspondents</th>
+                <th>Subject</th>
+                <th>Destination / result</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div id="addressList" class="address-list hidden"></div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="organizer.js"></script>
+  </body>
+</html>
