@@ -89,7 +89,7 @@ function managedBookReference(account, storedBook) {
   };
 }
 
-/** Validate a previously stored managed-book ID without creating or adopting. */
+/** Validate a previously stored managed-book ID without creating or rebinding. */
 export async function validateManagedContactBook(
   account,
   storedBook,
@@ -106,7 +106,7 @@ export async function validateManagedContactBook(
   validateManagedBook(book, expectedName);
   if (sameNamedBooks(books, expectedName, book.id).length) {
     throw new Error(
-      `Another address book named “${expectedName}” already exists and is not managed by this extension.`
+      `More than one address book is named “${expectedName}”. Rename the duplicate before continuing.`
     );
   }
   return {
@@ -117,8 +117,9 @@ export async function validateManagedContactBook(
 }
 
 /**
- * Explicitly set up one extension-owned local address book for a mail account.
- * Existing same-name books are never adopted implicitly.
+ * Explicitly set up one managed local address book for a mail account. When
+ * there is no valid stored ID, exactly one same-name local writable book is
+ * safely reused. Automatic/background import paths never perform this binding.
  */
 export async function setupManagedContactBook(
   account,
@@ -138,7 +139,7 @@ export async function setupManagedContactBook(
     validateManagedBook(existingStoredBook, expectedName);
     if (sameNamedBooks(books, expectedName, existingStoredBook.id).length) {
       throw new Error(
-        `Another address book named “${expectedName}” already exists and is not managed by this extension.`
+        `More than one address book is named “${expectedName}”. Rename the duplicate before continuing.`
       );
     }
     return {
@@ -149,10 +150,20 @@ export async function setupManagedContactBook(
     };
   }
 
-  if (sameNamedBooks(books, expectedName).length) {
+  const sameName = sameNamedBooks(books, expectedName);
+  if (sameName.length > 1) {
     throw new Error(
-      `An address book named “${expectedName}” already exists and is not managed by this extension.`
+      `More than one address book is named “${expectedName}”. Rename the duplicates before continuing.`
     );
+  }
+  if (sameName.length === 1) {
+    const existing = validateManagedBook(sameName[0], expectedName);
+    return {
+      accountId: id,
+      addressBookId: existing.id,
+      addressBookName: expectedName,
+      created: false
+    };
   }
 
   const createdId = await api.addressBooks.create({name: expectedName});

@@ -17,7 +17,7 @@
       </div>
     </header>
 
-    <main>
+    <main id="organizerControls" hidden>
       <div id="setupNotice" class="notice hidden">
         Enable a mail account and add at least one customer before processing mail or listing contacts.
       </div>
@@ -52,6 +52,8 @@
       <section id="lastRun" class="last-run hidden" aria-label="Last run"></section>
       <section id="automaticReviews" class="review-warning hidden" aria-label="Automatic messages awaiting review"></section>
     </main>
+
+    <div id="bootstrapError" class="bootstrap-error hidden" role="alert"></div>
 
     <footer>
       <button id="settings" class="link-button">Settings &amp; customer rules</button>

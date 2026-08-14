@@ -11,11 +11,28 @@ function source(path) {
 test("toolbar popup exposes the concise processing actions", () => {
   const html = source("extension/popup/popup.html");
   const script = source("extension/popup/popup.js");
+  const styles = source("extension/popup/popup.css");
 
   assert.match(html, /id="inbox"[^>]*>Process Inbox<\/button>/u);
   assert.match(html, /id="archiveMail"[^>]*>Archive Mails<\/button>/u);
   assert.match(html, /<strong>Customer Contacts List<\/strong>/u);
   assert.match(html, /All dates in the selected customer folder/u);
+  assert.match(html, /<main id="organizerControls" hidden>/u);
+  assert.match(html, /id="bootstrapError"[^>]*role="alert"/u);
+  assert.match(
+    script,
+    /hasInitializedAvailableAccount\(\s+bootstrap\.config,\s+bootstrap\.accounts\s+\);[\s\S]*?organizerControls\.hidden = !initialized;[\s\S]*?if \(!initialized\) return;/u
+  );
+  assert.match(
+    script,
+    /catch \(error\) \{[\s\S]*?bootstrapError\.textContent = error\.message;[\s\S]*?bootstrapError\.classList\.remove\("hidden"\);/u
+  );
+  assert.doesNotMatch(styles, /body\s*\{[^}]*min-height:/u);
+  assert.match(
+    styles,
+    /#status:not\(:empty\)\s*\{[^}]*min-height:\s*22px;[^}]*margin-top:\s*12px;/u
+  );
+  assert.doesNotMatch(styles, /#status:empty\s*\{[^}]*display:\s*none;/u);
   assert.doesNotMatch(html, /id="bulkInbox"/u);
   assert.doesNotMatch(html, /id="archive"/u);
   assert.match(

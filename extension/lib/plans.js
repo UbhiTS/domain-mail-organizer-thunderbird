@@ -301,10 +301,7 @@ export async function buildOrganizePlan(request, config, api = messenger) {
       continue;
     }
 
-    const classification = await classifyHeader(header, config, account.id, api, {
-      allowBody: !request.automatic,
-      allowSubject: !request.automatic
-    });
+    const classification = await classifyHeader(header, config, account.id, api);
     if (classification.status === "matched") {
       const customer = customerById(config, classification.customerId);
       if (!automatic && !destinations.has(customer.id)) {

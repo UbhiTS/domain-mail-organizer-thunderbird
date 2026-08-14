@@ -5,16 +5,20 @@
 
 A Thunderbird port of [Outlook Domain Mail Organizer](https://github.com/UbhiTS/outlook-domain-mail-organizer), built for people who work with several customer organizations at once.
 
-The extension scans customer mail locally and proposes account-local moves based on:
+The extension scans customer mail locally and uses the first match in this order:
 
-1. Exact configured sender domain or an exact sender address.
-2. Exact configured To, Cc, or Bcc recipient domain/address.
-3. An exact configured customer domain in the subject.
-4. A customer keyword in the subject.
-5. An exact configured customer domain in the message body.
-6. A customer keyword in the message body.
+1. Header addresses: an exact configured sender (From), To, or Cc address,
+   then an exact configured domain.
+2. Subject: an exact configured customer domain, then a customer keyword.
+3. Message body: an exact configured customer domain, then a customer keyword.
+4. No match: leave the message in Inbox for review or later archiving.
 
-That is the original Outlook precedence, with one safety improvement: if a single stage matches more than one customer, the message is marked ambiguous instead of being moved to whichever folder happens to be enumerated first.
+Matching stops as soon as a stage succeeds. Within a stage, the more specific
+match wins: exact address before domain for headers, and domain before keyword
+for subject/body. If equally specific matches identify several customers, the
+first enabled applicable customer in the saved **Customer rules** order wins.
+Settings displays and saves that order by customer name, so the result is
+repeatable instead of ambiguous.
 
 ## What is included
 
@@ -27,12 +31,13 @@ That is the original Outlook precedence, with one safety improvement: if a singl
 - Starred-message protection.
 - Exact, boundary-safe domain matching alongside exact-address, subject, body, and keyword matching. A domain rule never includes its subdomains unless they are configured separately.
 - A read-only **Customer Contacts List** for the selected direct customer folder. It scans every message-header page across all dates and lists every available normalized From/To/Cc/Bcc address, frequency-sorted and ready to copy as a semicolon-separated list.
-- Optional sender/recipient-only automatic filing for new Inbox mail after customer folders have been set up.
+- Optional automatic filing for new Inbox mail after customer folders have been set up. It follows the same deterministic header, subject, then body order; the subject and body stages honor their Processing defaults.
 - Automatic contact capture paired with automatic filing: after Thunderbird confirms a matched destination move, From/To/Cc/Bcc addresses that exactly match the customer rule are added to a dedicated local address book for that account. A per-account setting also captures coworkers at exact domains selected from the account's Thunderbird identities (`ubhi@google.com` proposes `google.com`).
 - A user-triggered **Build address books from existing mail** action in Settings. It reads every message-header page in the enabled account's configured customer folder trees, regardless of date or message count, and imports the same rule-matching customer and explicitly approved internal addresses without moving mail.
 - Startup and five-minute full-Inbox reconciliation against a compact durable activation baseline, recovering ordinary arrivals omitted by Thunderbird's new-mail event.
 - JSON settings import/export.
 - Setup reuses an exact existing account-local domain root/archive or creates it when missing.
+- Setup also reuses exactly one same-name local writable customer address book while preserving every existing contact, or creates the book when it is missing.
 - Setup automatically imports direct child domain folders into account-scoped customer rules; non-domain names and conflicts remain disabled for review.
 - Collapsible customer cards that open alphabetically sorted and collapsed; newly added customers stay expanded at the top until the page is reopened.
 - A message-list context action for previewing selected messages.
@@ -65,7 +70,7 @@ The XPI is unsigned. It can be used for local development/testing where Thunderb
 
 ## First-time setup
 
-1. Open **Domain Mail Organizer → Settings & customer rules**.
+1. Open the toolbar popup and select **Settings & customer rules**. On a fresh install, the popup intentionally shows only this setup action; processing controls appear after settings have first been saved for a current Thunderbird account.
 2. Enable the work account(s) you want the extension to use.
 3. Keep `Domains` as the domain root and `Archive` as the staging folder, or enter other dedicated exact names. Do not point the archive workflow at Gmail's `All Mail`.
 4. For a new account, automatic filing and all eligible exact internal identity domains start selected. Uncheck either before setup if you do not want it.
@@ -76,7 +81,7 @@ The XPI is unsigned. It can be used for local development/testing where Thunderb
    - Optional exact addresses for shared providers such as Gmail.
    - Optional project/customer keywords.
 6. Under **Capture internal coworkers from customer mail**, review the selected exact identity-derived domains. For `ubhi@google.com`, `@google.com` is selected; `mail.google.com` is not included. Uncheck personal/shared providers unless treating every address at that provider as internal is intentional.
-7. Select **Save & set up**. Each same-name mail folder is reused if present or created if absent. Direct children of the domain root are imported automatically: a valid domain-shaped name such as `rail.hitachi.com` becomes an enabled exact-domain rule; other names and conflicts become disabled drafts. Setup also creates one uniquely named managed local address book per enabled account. An unrelated address book with that exact name is not adopted or overwritten.
+7. Select **Save & set up**. Each same-name mail folder is reused if present or created if absent. Direct children of the domain root are imported automatically: a valid domain-shaped name such as `rail.hitachi.com` becomes an enabled exact-domain rule; other names and conflicts become disabled drafts. Setup also assigns one uniquely named local customer address book to each enabled account. If no address book has that generated name, setup creates one. If exactly one same-name book exists, setup reuses its ID only when it is local and writable, preserving every existing contact. Setup fails without writing contacts if the name is ambiguous or the only same-name book is remote or read-only.
 
 `Archive` here means an ordinary dedicated recovery folder. Thunderbird/provider special-use Archive folders are deliberately not reused; if one already occupies that name, choose another archive-folder name in Settings.
 8. Use **Process Inbox** in the toolbar popup for a normal date-window batch. For a full all-date run, open Settings and choose **Process entire Inbox** under **Mailbox tools**.
@@ -84,7 +89,7 @@ The XPI is unsigned. It can be used for local development/testing where Thunderb
 10. To seed the managed address book from mail already filed under the domain root, choose **Build address books from existing mail** in Settings. This is a deliberate, user-started operation and can take time for large or remote folders; keep Thunderbird and the Settings tab open until its progress report completes. If interrupted, run it again; existing contacts are skipped.
 
 Installing or updating the extension does not create folders, create address books, add contacts, or move messages. Folder discovery/import is read-only and never inspects message contents.
-When upgrading from 0.1.8, automatic filing pauses until **Save & set up** creates the managed contact book. Existing explicit automation choices are preserved.
+When upgrading from 0.1.8, automatic filing pauses until **Save & set up** safely reuses or creates the managed contact book. Existing explicit automation choices are preserved.
 Folder setup treats the configured exact domain-root/archive slots as explicit consent: it validates and reuses those ordinary account-local folders or creates them when absent. Preview and Apply still fail closed if a verified root changes later.
 
 ## Outlook-to-Thunderbird mapping
@@ -113,22 +118,24 @@ The dedicated Archive folder is intentional. Thunderbird maps Gmail's native Arc
 - Previewed organizer destinations are re-resolved and checked against their session ID before Apply; changed root/archive slots and folders that appear after preview fail closed.
 - Setup imports direct normal writable child folders only. It never recurses, reads messages, or enables a rule inferred from a broad public suffix or an exact-domain conflict.
 - Automatic filing requires a verified domain root from **Save & set up**, then safely creates a missing direct customer folder when its first matching message arrives.
-- Automatic filing uses sender/recipient domain and exact-address rules only; subject and body inference remain preview-only.
-- **Save & set up** creates one uniquely named managed local address book per enabled account. Setup fails safely if an unrelated address book already has that exact name; the extension never silently adopts, clears, or overwrites it.
+- Automatic filing and reviewed previews use the same deterministic routing order: From/To/Cc headers, optional subject, then optional body. A message with no match remains in Inbox.
+- Within one matching stage, exact header addresses beat domains and subject/body domains beat keywords. Among equally specific matches, the first enabled applicable customer in the saved **Customer rules** order wins. Settings sorts and saves those rules by customer name.
+- **Save & set up** binds each enabled account to one uniquely named local writable address book. It reuses exactly one same-name book by ID or creates one when none exists, and it preserves all contacts already in a reused book. Multiple same-name books are ambiguous; remote and read-only matches are unsupported. Those cases fail closed without creating another book or writing contacts. Similar but nonmatching names are never guessed.
+- After setup, the stored address-book ID remains authoritative while that book exists. Renaming the bound book does not silently switch the account to a different same-name book; setup reports the rename so the user can restore or deliberately replace the destination.
 - After Thunderbird confirms a matched automatic destination move, contact capture considers From, To, Cc, and Bcc addresses that exactly match that customer's configured domain/address rules. An API-accepted move that has not been confirmed remains in safety review and creates no contacts. If internal capture is enabled, it also accepts exact domains saved from that account's Thunderbird identities. It excludes every exact account identity and never mines the subject or body.
 - Internal matching is exact: approving `google.com` includes `coworker@google.com`, but not `coworker@mail.google.com`, `coworker@notgoogle.com`, or the user's own configured identities. Internal contacts use their exact domain (for example, `ORG:google.com`) instead of being attributed to the customer whose thread exposed them.
 - Contact headers are parsed once per message. Each automatic batch inventories existing email addresses once across all readable address books, then creates missing contacts sequentially. It never updates, merges, or deletes an existing contact.
 - Header addresses are not independently authenticated by the extension. Managed contacts use the normalized email address as their visible name rather than trusting a header display name. Customer-folder placement and managed contacts are organizational aids, not proof of sender identity; Thunderbird and the mail provider remain responsible for normal spam, phishing, and authentication checks.
 - **Customer Contacts List** is separate from address-book capture. It is read-only, scans the selected direct customer folder only (not descendants), exhausts every date and page without the preview limit, and lists all available normalized From/To/Cc/Bcc addresses, including the account's own identities and unrelated domains. It never reads bodies or writes contacts.
 - The Settings backfill action scans all dates and exhausts Thunderbird's paginated message-header lists for each configured direct customer folder and its descendants in each enabled account. Unrelated siblings beneath the domain root are not scanned. It has no 1,000-message preview cap, so a folder tree with 4,000 or more messages is processed to completion. The same pass captures approved internal coworkers without rescanning. It reads only From, To, Cc, and Bcc headers; it never fetches message bodies, moves messages, or creates/renames/deletes folders.
-- Backfill requires the verified domain root and managed address book created by **Save & set up**. Missing configured customer folders are skipped and reported; a missing or changed root fails closed. Existing email addresses are checked once globally across all address books, and rerunning the action is safe because exact duplicates are not recreated.
+- Backfill requires the verified domain root and the managed address book bound by **Save & set up**, whether that book was reused or created. Missing configured customer folders are skipped and reported; a missing or changed root fails closed. Existing email addresses are checked once globally across all address books, and rerunning the action is safe because exact duplicates are not recreated.
 - Previews, reviewed Apply actions, manual Thunderbird moves, and mail already present in a customer folder do not add contacts. If the managed address book is missing, renamed, or no longer writable, automatic filing and contact capture pause together until setup is repaired.
 - Enabling automatic filing first snapshots the complete current Inbox, so existing mail is not silently treated as a new arrival. New-mail event hints are persisted before filing work waits in a queue.
 - Every automatic move is journaled to local storage before Thunderbird is asked to move it. A copied or failed outcome is held for manual review and is never blindly retried; an accepted move remains claimed until Inbox reconciliation proves it absent.
 - Cross-account automatic moves are prohibited.
 - Junk, external/file messages, and messages below Trash, Junk, Drafts, Templates, or Outbox are excluded.
 - Message scans are paginated and work-bounded. A preview stores up to the configured limit (up to 1,000 rows), examines at most five times that limit (capped at 5,000 headers), prioritizes actionable messages over diagnostic rows, and can be narrowed or rerun after Apply.
-- **Process entire Inbox** in Settings keeps session-local occurrence progress for every examined message. Select and Apply a reviewed batch, then choose **Preview batch N+1**. A 4,000-message Inbox with 4,000 matches is handled as four batches of up to 1,000 actions plus a final verification scan. A batch with only unmatched, ambiguous, or protected mail can still advance to later messages.
+- **Process entire Inbox** in Settings keeps session-local occurrence progress for every examined message. Select and Apply a reviewed batch, then choose **Preview batch N+1**. A 4,000-message Inbox with 4,000 matches is handled as four batches of up to 1,000 actions plus a final verification scan. A batch with only unmatched or protected/skipped mail can still advance to later messages.
 - Body text is capped at 500,000 characters per message during matching and is off by default.
 - Domains are exact and boundary-safe: `shutterfly.com`, `em.shutterfly.com`, and `notshutterfly.com` are three different domains. A rule for `shutterfly.com` matches only that domain; mail from `em.shutterfly.com` stays unmatched unless that subdomain is configured separately.
 - Sister companies and subdomains route independently. For example, configure `hitachi.com`, `hal.hitachi.com`, `rail.hitachi.com`, and `cyber.hitachi.com` explicitly for their respective customer folders.
@@ -138,7 +145,7 @@ The requested permissions are intentionally limited:
 
 - `accountsRead`: discover the user's accounts and folders.
 - `accountsFolders`: create explicitly configured customer folders.
-- `addressBooks`: create the account's managed local contacts book, check all address books for exact-email duplicates, and add rule-matching customer or selected internal contacts after confirmed automatic destination moves or an explicit existing-mail backfill.
+- `addressBooks`: find and validate one same-name local writable contacts book or create it when absent, check all address books for exact-email duplicates, and add rule-matching customer or selected internal contacts after confirmed automatic destination moves or an explicit existing-mail backfill.
 - `messagesRead`: inspect headers, subject, and optionally body text.
 - `messagesMove`: move matched messages between the account-local organizer folders.
 - `storage`: save local rules, previews, and the last run summary.
@@ -188,7 +195,7 @@ For ATN listing and reviewer fields, use the paste-ready
 - Customer folders are direct children of the configured root in this version.
 - Gmail exposes IMAP folders as labels. This extension therefore uses a dedicated `Archive` label rather than Gmail `All Mail`; real Google Workspace label behavior still needs the manual test plan.
 - Automatic filing covers new Inbox messages only. Sent mail can be organized explicitly from the message-list context action; this release does not alter Thunderbird's normal send/FCC behavior.
-- Automatic filing intentionally uses only sender/recipient headers. Late Thunderbird filters can still race with the new-mail event, so avoid overlapping automatic rules for the same customers.
+- Automatic filing can read subject and, when enabled, body content after From/To/Cc headers fail to match. Late Thunderbird filters can still race with the new-mail event, so avoid overlapping automatic rules for the same customers.
 - Automatic contact capture is coupled to automatic Inbox filing. It does not run for previews, reviewed/manual moves, or mail placed in customer folders by another tool. Contacts already added remain ordinary user-owned Thunderbird contacts after automatic filing is disabled or the extension is uninstalled.
 - Existing mail is never mined implicitly. The Settings backfill runs only when requested, scans configured direct customer folder trees one account at a time, and may take several minutes for thousands of IMAP messages. It has no date or message-count cutoff, but Thunderbird or the mail provider may still surface synchronization/read errors in the final result.
 - Deleting or invalidating a managed customer-contacts address book pauses later automatic moves and contact captures for that account until setup is run successfully again. Mail already moved remains moved and is never retried solely because contact capture failed.

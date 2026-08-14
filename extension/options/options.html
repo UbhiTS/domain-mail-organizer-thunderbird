@@ -33,7 +33,7 @@
         <div class="section-heading">
           <div>
             <h2>Mail accounts</h2>
-            <p>Setup reuses folders with the configured domain-root and archive names or creates them when missing, then imports direct child folders as customer rules. Automatic moves never cross accounts.</p>
+            <p>Setup reuses folders with the configured domain-root and archive names or creates them when missing, then imports direct child folders as customer rules. It also reuses one same-name local writable address book without changing existing contacts, or creates it when absent. Automatic moves never cross accounts.</p>
           </div>
           <div class="section-actions">
             <button id="buildAddressBooks" class="secondary" type="button" aria-controls="status">Build address books from existing mail</button>
@@ -69,11 +69,11 @@
               </label>
               <label class="check-row">
                 <input id="scanSubject" type="checkbox">
-                <span><strong>Match subject</strong><small>Look for exact configured customer domains and keywords.</small></span>
+                <span><strong>Match subject</strong><small>After From/To/Cc; exact customer domains take priority over keywords.</small></span>
               </label>
               <label class="check-row">
                 <input id="scanBody" type="checkbox">
-                <span><strong>Match message body</strong><small>Useful when colleagues reply to customer threads; may fetch IMAP content.</small></span>
+                <span><strong>Match message body</strong><small>After subject; exact customer domains take priority over keywords. May fetch IMAP content.</small></span>
               </label>
               <label class="check-row">
                 <input id="preserveFlagged" type="checkbox">
@@ -119,7 +119,7 @@
         <div class="section-heading">
           <div>
             <h2>Customer rules</h2>
-            <p>Customers open collapsed and sorted by name. Expand a customer to edit its rules. Domain matching is exact: shutterfly.com does not match em.shutterfly.com. Add each domain or subdomain you want to match, and never enter a public suffix such as co.uk.</p>
+            <p>Customers open collapsed and sorted by name. Routing stops at the first matching stage: From/To/Cc, subject, then body. Exact header addresses beat domains; subject/body domains beat keywords. Among equally specific matches, the first enabled customer in this displayed order wins. Domain matching is exact: shutterfly.com does not match em.shutterfly.com. Add every domain or subdomain you want to match, and never enter a public suffix such as co.uk.</p>
           </div>
           <button id="addCustomer" class="secondary">Add customer</button>
         </div>

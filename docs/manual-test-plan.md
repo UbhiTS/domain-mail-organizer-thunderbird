@@ -8,7 +8,8 @@ Run these checks on Thunderbird 140 ESR or newer with a disposable profile and t
 - Confirm the background console has no startup errors.
 - Confirm the add-on requests account/folder read, folder creation, address-book read/write, message read/move, storage, menu, and alarm access only.
 - Confirm installation creates no folders or address books, adds no contacts, and moves no messages.
-- Confirm the toolbar button opens the popup and Settings opens in a tab.
+- On a fresh profile, confirm the toolbar popup shows branding and **Settings & customer rules** only: no account selector, time window, processing buttons, run history, or review controls appear. Confirm Settings opens in a tab.
+- Save settings for one current account, reopen the popup, and confirm processing controls appear. Add an uninitialized account and confirm the configured account keeps the popup operational. Remove the only initialized account while preserving stale extension state and confirm the popup returns to Settings-only.
 
 ## 2. Settings validation
 
@@ -25,11 +26,14 @@ Run these checks on Thunderbird 140 ESR or newer with a disposable profile and t
 ## 3. Folder setup
 
 - Run **Save & set up**.
-- Confirm the configured `Domains` root, dedicated `Archive`, one direct child per active customer, and one uniquely named `Customer Contacts — …` local address book are created for each enabled account.
+- Confirm the configured `Domains` root, dedicated `Archive`, one direct child per active customer, and one uniquely named `Customer Contacts — …` local address book are created for each enabled account when none already exists.
 - On an account with a provider special-use Archive already named `Archive`, confirm setup refuses to repurpose it and clearly asks for a different ordinary archive-folder name.
 - Run setup a second time and confirm no duplicate folders are created.
 - Confirm the second setup also reuses the extension's managed address-book ID and creates no duplicate address book.
-- Before first setup, create an unrelated address book with the exact proposed `Customer Contacts — …` name. Confirm setup fails safely instead of adopting, clearing, or overwriting it. Rename/delete the test collision, rerun setup, and confirm the managed book is created.
+- Before first setup, create one same-name local writable address book using the exact proposed `Customer Contacts — …` name and add a sentinel contact. Confirm setup reuses that book's ID, preserves the sentinel unchanged, and adds later captured contacts alongside it instead of creating a duplicate book.
+- Create two books with that same name (using development tooling if the UI prevents it), then run setup. Confirm the ambiguous name fails closed: neither book is selected or changed, no third book is created, and automatic filing remains paused. Repeat with one local writable book plus any second same-name book and confirm ambiguity still wins.
+- Test a sole same-name remote address book and a sole same-name read-only address book. Confirm each is refused without a replacement or contact write and the status identifies the unsupported property. A differently named local writable book must not be guessed or reused.
+- After setup, rename the bound book and create another local writable book with the expected name. Confirm setup reports the renamed stored-ID destination instead of silently switching to the new book. Restore the bound book's name and confirm setup succeeds with its original ID.
 - Before first setup, create ordinary exact-name `Domains` and `Archive` folders. Confirm setup validates/reuses them without duplicates and preserves their contents.
 - Put direct children named `acme.com`, `Rail.Hitachi.com`, and `Acme Projects` below `Domains`, then run setup. Confirm direct normal writable children are imported automatically as rules.
 - Confirm domain-shaped folders become enabled, account-scoped exact-domain rules. Confirm `Acme Projects` becomes a disabled draft and an exact domain already owned by another active rule imports disabled with a warning.
@@ -53,7 +57,11 @@ Create test mail so each case is isolated:
 - Configure `shutterfly.com` only; confirm `person@shutterfly.com` matches Shutterfly while `person@em.shutterfly.com` remains unmatched in Inbox.
 - Add `em.shutterfly.com` explicitly and confirm it now follows only the customer rule that owns that exact subdomain.
 - Configure separate `hitachi.com`, `hal.hitachi.com`, `rail.hitachi.com`, and `cyber.hitachi.com` customers; confirm each exact domain lands in its own customer folder without inheriting or falling back to another rule.
-- A message matching recipients from two customers → ambiguous and not selected.
+- Configure `Alpha` and `Beta` so one header stage matches both customers by exact domain. Confirm Alpha wins because it is first in the name-sorted Customer rules list. Rename Alpha to `Zulu`, save, and confirm Beta now wins the equally specific tie.
+- Configure an exact address for one customer and its domain for another. Confirm the exact-address customer wins the header stage even when its customer rule sorts later.
+- Give one message a From/To/Cc match for one customer, a subject match for another, and a body match for a third. Confirm the header stage wins. Remove that match and confirm subject wins; then remove the subject match and confirm body wins.
+- In a subject or body, include a configured domain for one customer and a keyword for an earlier-sorted customer. Confirm the domain customer wins. Then use two domain matches, and separately two keyword matches, and confirm the first saved Customer rule wins each equally specific tie.
+- Remove every matching value and confirm the message remains unmatched in Inbox for review or later archiving.
 - A starred matching message → protected/skipped.
 - A selected message inside a child of Trash/Junk/Drafts/Templates/Outbox → skipped.
 
@@ -94,9 +102,11 @@ Preview the 1-, 2-, 7-, and 30-day windows and All. Confirm no message moves dur
 - Enable auto-file for a test account.
 - Before enabling, leave matching historical mail in Inbox; confirm activation snapshots it and does not retroactively move it.
 - Receive matching and nonmatching messages.
-- Confirm only an unstarred, non-junk, unambiguous matching Inbox message moves.
+- Confirm an unstarred, non-junk matching Inbox message moves to the first deterministic match and a nonmatching message remains in Inbox.
 - With only `shutterfly.com` configured, receive mail from `em.shutterfly.com`; confirm it remains in Inbox and does not increment the Shutterfly customer folder.
-- Confirm a message matching only by subject or body remains in Inbox; unattended filing is sender/recipient-only.
+- Enable subject matching and confirm a subject-only domain/keyword match files automatically after From/To/Cc fail. Disable it and confirm the same kind of new message stays in Inbox.
+- Enable body matching and confirm a body-only domain/keyword match files automatically after From/To/Cc and subject fail. Disable it and confirm the same kind of new message stays in Inbox.
+- Receive a message that matches two customers equally at the same active stage and confirm the first name-sorted Customer rule wins without generating an ambiguous/manual-review entry. Repeat with a more specific later-sorted rule and confirm specificity wins.
 - Delete a customer destination under the verified domain root, receive matching mail, and confirm the configured direct child is recreated before the message moves.
 - Receive a multi-page burst larger than the preview limit and confirm automatic filing considers every message in the event instead of dropping the tail.
 - Receive a matching message while another organizer operation is running; confirm the arrival list is drained and the message is rechecked before it moves.

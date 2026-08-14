@@ -48,3 +48,25 @@ test("privacy disclosure states safety-journal retention and user control", asyn
   assert.match(privacy, /no in-product command that clears individual safety/u);
   assert.match(privacy, /not proof of sender identity/u);
 });
+
+test("user disclosures explain safe existing address-book reuse", async () => {
+  const [readme, privacy, manualPlan, atn, settings, settingsScript] = await Promise.all([
+    projectFile("README.md"),
+    projectFile("PRIVACY.md"),
+    projectFile("docs/manual-test-plan.md"),
+    projectFile("docs/atn-submission.md"),
+    projectFile("extension/options/options.html"),
+    projectFile("extension/options/options.js")
+  ]);
+
+  for (const disclosure of [readme, privacy, manualPlan, atn]) {
+    assert.match(disclosure, /same-name local writable/u);
+    assert.match(disclosure, /preserv/u);
+    assert.match(disclosure, /remote/u);
+    assert.match(disclosure, /read-only/u);
+  }
+  assert.match(readme, /Multiple same-name books are ambiguous/u);
+  assert.match(settings, /reuses one same-name local writable address book/u);
+  assert.match(settingsScript, /reuse or create the managed customer address book/u);
+  assert.match(settingsScript, /created; \$\{reusedBooks\} reused/u);
+});

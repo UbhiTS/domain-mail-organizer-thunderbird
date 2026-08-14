@@ -124,9 +124,9 @@ export function createAutomaticFiler({
       }
       const selected = plan.items.filter(item => item.action).map(item => item.id);
       if (!selected.length) {
-        // Preserve useful diagnostics for ambiguous/protected arrivals without
-        // replacing the prior run for ordinary unmatched newsletters.
-        if (plan.summary?.ambiguous || plan.summary?.skipped || suppressedCount) {
+        // Preserve useful diagnostics for protected/review-held arrivals
+        // without replacing the prior run for ordinary unmatched newsletters.
+        if (plan.summary?.skipped || suppressedCount) {
           await saveLastRun({
             kind: "automatic",
             title: "Automatic Inbox filing",
@@ -135,7 +135,7 @@ export function createAutomaticFiler({
             attempted: 0,
             completed: 0,
             failed: 0,
-            error: `${plan.summary.ambiguous ?? 0} ambiguous, ${plan.summary.skipped ?? 0} protected/skipped, and ${suppressedCount} awaiting manual review; no messages moved`
+            error: `${plan.summary.skipped ?? 0} protected/skipped and ${suppressedCount} awaiting manual review; no messages moved`
           });
         }
         return {status: "no-match", plan};
@@ -221,8 +221,8 @@ export function createAutomaticFiler({
         createFolders: true,
         liveDestinations: true,
         isUserAction: false,
-        allowBody: false,
-        allowSubject: false,
+        allowBody: true,
+        allowSubject: true,
         requireInboxSource: true,
         requireDefiniteMove: true,
         confirmMove: journaledConfirmMove

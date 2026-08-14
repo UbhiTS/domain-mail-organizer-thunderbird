@@ -196,7 +196,7 @@ test("archive scanning has a hard examined-message budget", async () => {
   assert.equal(plan.truncated, true);
 });
 
-test("automatic filing ignores subject-only matches", async () => {
+test("automatic and manual filing both use subject-only matches", async () => {
   const tree = folders();
   const message = header(1, tree.inbox, {subject: "Escalation for acme.com"});
   const customer = {
@@ -245,8 +245,88 @@ test("automatic filing ignores subject-only matches", async () => {
     api
   );
 
-  assert.equal(automatic.summary.actionable, 0);
+  assert.equal(automatic.summary.actionable, 1);
+  assert.equal(automatic.items[0].customerId, "acme");
   assert.equal(manual.summary.actionable, 1);
+  assert.equal(manual.items[0].customerId, "acme");
+});
+
+test("automatic filing reads the body when body scanning is enabled", async () => {
+  const fixture = bulkOrganizeApi([]);
+  // Use the fixture's actual Inbox object so source/account safety checks see
+  // the same folder tree returned by the mock account.
+  const message = header(1, fixture.inbox, {
+    author: "Outside <person@outside.example>",
+    subject: "No customer reference"
+  });
+  fixture.api.messages.listInlineTextParts = async messageId => {
+    assert.equal(messageId, 1);
+    return [{contentType: "text/plain", content: "The acme launch needs attention"}];
+  };
+  const rules = config({
+    scanBody: true,
+    customers: [{
+      id: "acme",
+      name: "Acme",
+      folderName: "Acme",
+      enabled: true,
+      accountIds: [],
+      domains: ["acme.com"],
+      addresses: [],
+      keywords: ["acme launch"]
+    }]
+  });
+
+  const plan = await buildOrganizePlan(
+    {accountId: "work", days: 0, automatic: true, messageList: {id: null, messages: [message]}},
+    rules,
+    fixture.api
+  );
+
+  assert.equal(plan.summary.actionable, 1);
+  assert.equal(plan.items[0].customerId, "acme");
+  assert.match(plan.items[0].reason, /^body /u);
+});
+
+test("Bcc alone is not a customer-routing signal", async () => {
+  const fixture = bulkOrganizeApi([]);
+  const message = header(1, fixture.inbox, {
+    author: "Outside <person@outside.example>",
+    bccList: ["Acme <hidden@acme.com>"]
+  });
+
+  const plan = await buildOrganizePlan(
+    {accountId: "work", days: 0, automatic: false, messageList: {id: null, messages: [message]}},
+    bulkOrganizeConfig(),
+    fixture.api
+  );
+
+  assert.equal(plan.summary.actionable, 0);
+  assert.equal(plan.summary.unmatched, 1);
+});
+
+test("both To and Cc addresses participate in the customer address stage", async () => {
+  const fixture = bulkOrganizeApi([]);
+  const messages = [
+    header(1, fixture.inbox, {
+      author: "Outside <person@outside.example>",
+      recipients: ["Acme <to@acme.com>"]
+    }),
+    header(2, fixture.inbox, {
+      author: "Outside <person@outside.example>",
+      ccList: ["Acme <cc@acme.com>"]
+    })
+  ];
+
+  const plan = await buildOrganizePlan(
+    {accountId: "work", days: 0, automatic: false, messageList: {id: null, messages}},
+    bulkOrganizeConfig(),
+    fixture.api
+  );
+
+  assert.equal(plan.summary.actionable, 2);
+  assert.deepEqual(plan.items.map(item => item.customerId), ["acme", "acme"]);
+  assert.ok(plan.items.every(item => item.reason.startsWith("address ")));
 });
 
 test("a first Apply persists ownership of the customer root for later previews and setup", async () => {

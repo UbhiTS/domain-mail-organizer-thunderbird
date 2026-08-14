@@ -1068,17 +1068,28 @@ async function handleCommand(message) {
                 messenger
               )
             );
+            // Thunderbird exposes no atomic name claim. Re-list and validate
+            // the chosen stable ID immediately before persisting/activating it
+            // so a concurrent rename, deletion, or duplicate fails closed.
+            const verifiedContactBook = await validateManagedContactBook(
+              account,
+              contactBook,
+              messenger
+            );
             managedContactBooks[account.id] = {
-              addressBookId: contactBook.addressBookId,
-              addressBookName: contactBook.addressBookName
+              addressBookId: verifiedContactBook.addressBookId,
+              addressBookName: verifiedContactBook.addressBookName
             };
-            // Persist ownership immediately after Thunderbird creates or
-            // validates the book. A later folder/config storage failure must
-            // not orphan a newly created same-name book as "unowned".
+            // Persist the exact destination immediately after Thunderbird
+            // creates, validates, or safely reuses the book. A later
+            // folder/config storage failure must not lose that binding.
             await messenger.storage.local.set({
               [CONTACT_BOOKS_KEY]: managedContactBooks
             });
-            contactBooks.push(contactBook);
+            contactBooks.push({
+              ...verifiedContactBook,
+              created: contactBook.created
+            });
           } catch (error) {
             accountConfig.autoFileIncoming = false;
             accountConfig.autoFileSince = null;

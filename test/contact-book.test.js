@@ -155,38 +155,48 @@ test("stored managed-book names survive mail-account display-name changes", asyn
   );
 });
 
-test("setup refuses a same-name unowned address book instead of adopting it", async () => {
+test("setup reuses a unique same-name local writable address book", async () => {
   let createCalls = 0;
   const api = {
     addressBooks: {
-      list: async () => [addressBook("unowned", "customer contacts — work (work)")],
+      list: async () => [addressBook("existing", "customer contacts — work (work)")],
       create: async () => {
         createCalls += 1;
       }
     }
   };
 
-  await assert.rejects(
-    setupManagedContactBook(account, null, api),
-    /already exists and is not managed/u
+  assert.deepEqual(
+    await setupManagedContactBook(account, null, api),
+    {
+      accountId: "work",
+      addressBookId: "existing",
+      addressBookName: expectedName,
+      created: false
+    }
   );
   assert.equal(createCalls, 0);
 });
 
-test("setup does not claim an unowned collision when its stored ID went stale", async () => {
+test("setup repairs a stale stored ID by reusing a unique same-name book", async () => {
   let createCalls = 0;
   const api = {
     addressBooks: {
-      list: async () => [addressBook("unowned")],
+      list: async () => [addressBook("replacement-existing")],
       create: async () => {
         createCalls += 1;
       }
     }
   };
 
-  await assert.rejects(
-    setupManagedContactBook(account, "deleted-managed-book", api),
-    /not managed/u
+  assert.deepEqual(
+    await setupManagedContactBook(account, "deleted-managed-book", api),
+    {
+      accountId: "work",
+      addressBookId: "replacement-existing",
+      addressBookName: expectedName,
+      created: false
+    }
   );
   assert.equal(createCalls, 0);
 });

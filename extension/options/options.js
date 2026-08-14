@@ -360,10 +360,10 @@ function renderAccounts() {
       autoHelp.textContent = !autoFile.checked
         ? "Automatic Inbox filing and automatic contact capture are off for this account."
         : automationReady
-          ? "Sender/recipient rules only. After Thunderbird confirms each destination move, customer contacts and any selected internal coworkers are added to the address book. A successful manual preview is recommended first."
+          ? "Uses the first matching stage: From/To/Cc, enabled subject, then enabled body. Exact addresses beat domains; subject/body domains beat keywords; equal matches use the first Customer rule. After Thunderbird confirms the move, eligible customer contacts and selected internal coworkers are added to the address book."
         : rootReady
           ? bootstrap.managedContactBookErrors?.[account.id] ||
-            "Your preference is saved; choose Save & set up to create the managed customer address book and activate it."
+            "Your preference is saved; choose Save & set up to reuse or create the managed customer address book and activate it."
           : "Your preference is saved; choose Save & set up to reuse or create the folders and activate it.";
     };
     rootFolder.addEventListener("input", updateRootState);
@@ -552,7 +552,13 @@ async function saveSettings(quiet = false) {
         account => account.enabled && account.autoFileRequested && !account.autoFileIncoming
       ).length;
       const imported = setup.result.importedCustomers?.length ?? 0;
-      const setupSummary = `${setup.result.folders.length} mail destination${setup.result.folders.length === 1 ? "" : "s"} verified; ${imported} customer rule${imported === 1 ? "" : "s"} imported.`;
+      const contactBooks = setup.result.contactBooks ?? [];
+      const createdBooks = contactBooks.filter(book => book.created).length;
+      const reusedBooks = contactBooks.length - createdBooks;
+      const contactSummary = contactBooks.length
+        ? ` ${createdBooks} customer address book${createdBooks === 1 ? "" : "s"} created; ${reusedBooks} reused.`
+        : "";
+      const setupSummary = `${setup.result.folders.length} mail destination${setup.result.folders.length === 1 ? "" : "s"} verified; ${imported} customer rule${imported === 1 ? "" : "s"} imported.${contactSummary}`;
       const automaticSummary = automaticAccounts
         ? ` Automatic Inbox filing is active for ${automaticAccounts} account${automaticAccounts === 1 ? "" : "s"}.`
         : pendingAutomaticAccounts

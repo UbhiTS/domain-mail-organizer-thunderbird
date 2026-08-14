@@ -620,6 +620,76 @@ test("automatic filing routes an explicitly configured sister-company domain", a
   ]);
 });
 
+test("automatic filing uses displayed Customer Rules order across From, To, and Cc", async () => {
+  const box = mailbox({destinationExists: false, messageCount: 1});
+  box.config.customers = [
+    {
+      id: "sender-second",
+      name: "Sender Second",
+      folderName: "Sender Second",
+      enabled: true,
+      accountIds: [],
+      domains: ["sender.example.com"],
+      addresses: [],
+      keywords: []
+    },
+    {
+      id: "recipient-first",
+      name: "Recipient First",
+      folderName: "Recipient First",
+      enabled: true,
+      accountIds: [],
+      domains: ["recipient.example.com"],
+      addresses: [],
+      keywords: []
+    }
+  ];
+  box.messages[0].author = "Sender <person@sender.example.com>";
+  box.messages[0].recipients = ["Recipient <person@recipient.example.com>"];
+  const {filer} = automaticFiler({api: box.api, config: box.config});
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.equal(result.status, "complete");
+  assert.deepEqual(box.creates.map(({parentId, name}) => ({parentId, name})), [
+    {parentId: box.customerRoot.id, name: "Recipient First"}
+  ]);
+  assert.equal(box.moves.length, 1);
+  assert.equal(box.moves[0].destinationId, box.creates[0].folder.id);
+});
+
+test("automatic filing moves a subject-only customer match", async () => {
+  const box = mailbox({destinationExists: true, messageCount: 1});
+  box.messages[0].author = "Outside <person@outside.example>";
+  box.messages[0].subject = "Escalation for acme.com";
+  const {filer} = automaticFiler({api: box.api, config: box.config});
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.equal(result.status, "complete");
+  assert.equal(result.completed, 1);
+  assert.deepEqual(box.moves.map(move => move.destinationId), [box.destination.id]);
+});
+
+test("automatic filing moves a body-only keyword match when body scanning is enabled", async () => {
+  const box = mailbox({destinationExists: true, messageCount: 1});
+  box.config.scanBody = true;
+  box.config.customers[0].keywords = ["acme launch"];
+  box.messages[0].author = "Outside <person@outside.example>";
+  box.messages[0].subject = "No customer reference";
+  box.api.messages.listInlineTextParts = async messageId => {
+    assert.equal(messageId, box.messages[0].id);
+    return [{contentType: "text/plain", content: "Please review the Acme Launch plan"}];
+  };
+  const {filer} = automaticFiler({api: box.api, config: box.config});
+
+  const result = await filer.handleNewMail(box.inbox, {id: null, messages: box.messages});
+
+  assert.equal(result.status, "complete");
+  assert.equal(result.completed, 1);
+  assert.deepEqual(box.moves.map(move => move.destinationId), [box.destination.id]);
+});
+
 test("automatic filing leaves an unconfigured subdomain in Inbox", async () => {
   const box = mailbox({destinationExists: false, messageCount: 1});
   box.config.customers = [{
@@ -835,8 +905,8 @@ test("a partial automatic apply is reported once and never reconciled or replaye
       assert.equal(options.liveDestinations, true);
       assert.equal(options.requireInboxSource, true);
       assert.equal(options.requireDefiniteMove, true);
-      assert.equal(options.allowSubject, false);
-      assert.equal(options.allowBody, false);
+      assert.equal(options.allowSubject, true);
+      assert.equal(options.allowBody, true);
       assert.equal(options.isUserAction, false);
       return {
         attempted: 2,

@@ -42,8 +42,7 @@ export async function messageAddressData(header, api = messenger) {
     parseMailboxValues(
       [
         ...(header.recipients ?? []),
-        ...(header.ccList ?? []),
-        ...(header.bccList ?? [])
+        ...(header.ccList ?? [])
       ],
       api
     )

@@ -6,9 +6,14 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   external service.
 - It requests Thunderbird access to account folders and message headers so it
   can preview and perform user-approved moves.
-- **Save & set up** creates one uniquely named local address book per
-  enabled account. After Thunderbird confirms an enabled automatic Inbox move
-  reached its destination,
+- **Save & set up** assigns one uniquely named local writable address book per
+  enabled account. If no book has the generated name, setup creates it. If
+  exactly one same-name local writable address book exists, setup validates and
+  reuses its ID. Every contact already in a reused book is preserved. Multiple
+  same-name books are treated as ambiguous, and a remote or read-only same-name
+  book is refused; those failures create no replacement book and write no
+  contacts. After Thunderbird confirms an enabled automatic Inbox move reached
+  its destination,
   the extension can add customer-rule-matching addresses found in that
   message's From, To, Cc, and Bcc headers to the account's managed book. If the
   user selects internal domains for that account, the same headers
@@ -50,10 +55,17 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   messages, or write to any address book.
 - If the managed address book is deleted, renamed, or becomes read-only,
   automatic filing and contact capture pause together until setup is repaired.
+  While a stored address-book ID still resolves, it remains authoritative;
+  renaming that book does not make the extension silently select another book.
 - Optional body matching asks Thunderbird for message text and is disabled by
   default. For a remote mailbox, that request may cause Thunderbird and the
   configured provider to perform their normal IMAP content fetch; the extension
   does not send the content elsewhere.
+- Customer routing stops at the first matching stage: From/To/Cc, optional
+  subject, then optional body. Exact header addresses take priority over
+  domains, and subject/body domains take priority over keywords. Among equally
+  specific matches, the first enabled applicable customer in the name-sorted
+  order saved from Settings wins. A message with no match remains in Inbox.
 - Preview and review plans are held in the extension's Thunderbird session
   storage. A mail-action plan can include message and Message-ID identifiers,
   date, author, displayed recipients, subject, size, source account/folder,
@@ -65,7 +77,7 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   holds the exact Thunderbird message identifiers already examined in that
   run; those identifiers expire with the extension session and are never used
   by themselves as authority to move mail.
-- Settings, managed address-book ownership references, the latest run summary,
+- Settings, managed address-book destination references, the latest run summary,
   automatic-filing state, and safety journals are stored in the extension's
   local Thunderbird storage. Automatic filing keeps compact Inbox
   baseline fingerprints, occurrence counts, arrival hints, and manual-review
@@ -89,8 +101,9 @@ Domain Mail Organizer processes mail locally inside Thunderbird.
   uninstall according to Thunderbird's storage lifecycle.
 - Removing the extension through Thunderbird removes its extension-managed
   state according to Thunderbird's storage lifecycle. Folders, messages, local
-  address books, and contacts already created or moved remain user-owned data
-  in Thunderbird. Disabling automatic filing likewise does not remove contacts.
+  address books (whether created or reused by setup), and contacts already
+  created or moved remain user-owned data in Thunderbird. Disabling automatic
+  filing likewise does not remove contacts.
 
 The extension itself makes no host or network requests. Thunderbird and the
 configured mail and address-book providers continue to perform their normal

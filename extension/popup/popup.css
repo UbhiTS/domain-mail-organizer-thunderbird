@@ -17,7 +17,6 @@
 body {
   margin: 0;
   width: 390px;
-  min-height: 500px;
   color: light-dark(#202124, #f1f3f4);
   background: var(--surface);
 }
@@ -65,8 +64,18 @@ button.warning { background: var(--warning); }
   grid-column: 1 / -1;
 }
 .wide-action small { color: var(--muted); font-size: 11px; font-weight: 400; }
-#status { min-height: 22px; margin-top: 12px; color: var(--muted); font-size: 12px; white-space: pre-line; }
+#status { color: var(--muted); font-size: 12px; white-space: pre-line; }
+#status:not(:empty) { min-height: 22px; margin-top: 12px; }
 #status.error { color: light-dark(#b3261e, #ffb4ab); }
+.bootstrap-error {
+  margin: 12px 18px;
+  padding: 10px;
+  border-radius: 7px;
+  color: light-dark(#b3261e, #ffb4ab);
+  background: var(--subtle);
+  font-size: 12px;
+  white-space: pre-line;
+}
 .notice, .last-run, .review-warning { padding: 10px; margin-bottom: 12px; border-radius: 7px; background: var(--subtle); font-size: 12px; }
 .last-run { margin-top: 8px; margin-bottom: 0; }
 .last-run strong { display: block; margin-bottom: 3px; }

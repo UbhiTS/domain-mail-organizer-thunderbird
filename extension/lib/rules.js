@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
 import {parse as parsePublicSuffix} from "../vendor/psl.mjs";
+import {customersByName} from "./sort.js";
 
 function safeHostname(value) {
   try {
@@ -86,49 +87,37 @@ function customerInScope(customer, accountId) {
   );
 }
 
-function uniqueCustomers(matches) {
-  const byId = new Map();
-  for (const match of matches) {
-    byId.set(match.customer.id, match);
-  }
-  return [...byId.values()];
-}
+function matchEmails(emails, customers) {
+  const candidates = (emails ?? [])
+    .map(email => normalizeEmail(email))
+    .filter(Boolean)
+    .map(email => ({email, domain: domainFromEmail(email)}));
 
-function exactDomainMatches(candidateDomain, customers) {
-  const matches = [];
+  // Exact addresses are more specific than domains. Customer Rules order is
+  // the stable tie-breaker among matches with the same specificity.
+  const addressMatches = [];
   for (const customer of customers) {
-    for (const configuredDomain of customer.domains) {
-      if (candidateDomain === configuredDomain) {
-        matches.push({
-          customer,
-          value: configuredDomain,
-          candidateDomain,
-          matcher: "domain"
-        });
+    for (const {email} of candidates) {
+      if (customer.addresses.includes(email)) {
+        addressMatches.push({customer, value: email, matcher: "address"});
+        break;
       }
     }
   }
-  return uniqueCustomers(matches);
-}
+  if (addressMatches.length) {
+    return addressMatches;
+  }
 
-function matchEmails(emails, customers) {
-  const matches = [];
-  for (const rawEmail of emails ?? []) {
-    const email = normalizeEmail(rawEmail);
-    const domain = domainFromEmail(email);
-    if (!email || !domain) {
-      continue;
-    }
-    const addressMatches = customers
-      .filter(customer => customer.addresses.includes(email))
-      .map(customer => ({customer, value: email, matcher: "address"}));
-    if (addressMatches.length) {
-      matches.push(...addressMatches);
-    } else {
-      matches.push(...exactDomainMatches(domain, customers));
+  const domainMatches = [];
+  for (const customer of customers) {
+    for (const {domain} of candidates) {
+      if (customer.domains.includes(domain)) {
+        domainMatches.push({customer, value: domain, matcher: "domain"});
+        break;
+      }
     }
   }
-  return uniqueCustomers(matches);
+  return domainMatches;
 }
 
 function hostnameCandidates(text) {
@@ -148,12 +137,16 @@ function matchText(text, customers) {
     return [];
   }
   const normalizedText = text.toLowerCase();
+  const domains = new Set(hostnameCandidates(normalizedText));
   const domainMatches = [];
-  for (const candidate of hostnameCandidates(normalizedText)) {
-    domainMatches.push(...exactDomainMatches(candidate, customers));
+  for (const customer of customers) {
+    const domain = customer.domains.find(candidate => domains.has(candidate));
+    if (domain) {
+      domainMatches.push({customer, value: domain, matcher: "domain"});
+    }
   }
   if (domainMatches.length) {
-    return uniqueCustomers(domainMatches);
+    return domainMatches;
   }
 
   const keywordMatches = [];
@@ -165,20 +158,12 @@ function matchText(text, customers) {
       }
     }
   }
-  return uniqueCustomers(keywordMatches);
+  return keywordMatches;
 }
 
 function stageResult(matches, stage) {
   if (!matches.length) {
     return null;
-  }
-  if (matches.length > 1) {
-    return {
-      status: "ambiguous",
-      stage,
-      reason: `${stage} matched multiple customers`,
-      customerIds: matches.map(match => match.customer.id)
-    };
   }
   const [match] = matches;
   return {
@@ -190,11 +175,11 @@ function stageResult(matches, stage) {
 }
 
 /**
- * Preserve the Outlook add-in's precedence while refusing an arbitrary winner
- * when one stage maps to multiple customers.
+ * Preserve the Outlook add-in's precedence and select the first deterministic
+ * match in each stage: sender, To/Cc recipient, subject, then body.
  */
 export function classifyMessage(message, config, accountId) {
-  const customers = (config.customers ?? []).filter(customer =>
+  const customers = customersByName(config.customers ?? []).filter(customer =>
     customerInScope(customer, accountId)
   );
 
@@ -203,8 +188,13 @@ export function classifyMessage(message, config, accountId) {
   }
 
   const stages = [
-    ["sender", matchEmails(message.authorEmails, customers)],
-    ["recipient", matchEmails(message.recipientEmails, customers)]
+    [
+      "address",
+      matchEmails(
+        [...(message.authorEmails ?? []), ...(message.recipientEmails ?? [])],
+        customers
+      )
+    ]
   ];
   if (config.scanSubject !== false) {
     stages.push(["subject", matchText(message.subject, customers)]);

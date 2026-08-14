@@ -98,7 +98,6 @@ function renderSummary() {
   elements.summary.replaceChildren(
     summaryCard(state.isBulk ? "Examined this batch" : "Scanned", scanned),
     summaryCard("Ready", remainingActionCount()),
-    summaryCard("Ambiguous", plan.summary.ambiguous),
     summaryCard("Unmatched", plan.summary.unmatched),
     summaryCard("Protected / skipped", plan.summary.skipped)
   );

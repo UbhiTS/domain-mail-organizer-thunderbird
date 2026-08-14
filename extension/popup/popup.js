@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Tarun Ubhi (UbhiTS). Licensed under the MIT License.
 // SPDX-License-Identifier: MIT
+import {hasInitializedAvailableAccount} from "../lib/initialization.js";
+
 const elements = {
   account: document.querySelector("#account"),
   days: document.querySelector("#days"),
@@ -10,7 +12,9 @@ const elements = {
   status: document.querySelector("#status"),
   setupNotice: document.querySelector("#setupNotice"),
   lastRun: document.querySelector("#lastRun"),
-  automaticReviews: document.querySelector("#automaticReviews")
+  automaticReviews: document.querySelector("#automaticReviews"),
+  organizerControls: document.querySelector("#organizerControls"),
+  bootstrapError: document.querySelector("#bootstrapError")
 };
 
 let bootstrap;
@@ -51,6 +55,13 @@ function renderLastRun(lastRun) {
 }
 
 function populate() {
+  const initialized = hasInitializedAvailableAccount(
+    bootstrap.config,
+    bootstrap.accounts
+  );
+  elements.organizerControls.hidden = !initialized;
+  if (!initialized) return;
+
   elements.account.replaceChildren();
   const enabled = bootstrap.accounts.filter(account => bootstrap.config.accounts[account.id]?.enabled);
   for (const account of enabled) {
@@ -136,5 +147,8 @@ try {
   bootstrap = await send("getBootstrap");
   populate();
 } catch (error) {
-  setStatus(error.message, true);
+  // A bootstrap failure is not evidence of a first run. Surface the diagnostic
+  // without exposing actions whose state could not be loaded.
+  elements.bootstrapError.textContent = error.message;
+  elements.bootstrapError.classList.remove("hidden");
 }

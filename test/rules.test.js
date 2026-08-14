@@ -15,7 +15,7 @@ function config(customers, overrides = {}) {
 }
 
 function customer(id, domains = [], keywords = [], addresses = [], accountIds = []) {
-  return {id, enabled: true, domains, keywords, addresses, accountIds};
+  return {id, name: id, enabled: true, domains, keywords, addresses, accountIds};
 }
 
 test("normalizes domains and rejects unsafe or incomplete values", () => {
@@ -96,7 +96,7 @@ test("explicit sister-company domains route independently from their parent", ()
   }
 });
 
-test("different explicitly configured sister companies stay ambiguous within a stage", () => {
+test("the first displayed sister company wins when one address stage matches several", () => {
   const rules = config([
     customer("hitachi", ["hitachi.com"]),
     customer("rail", ["rail.hitachi.com"]),
@@ -107,11 +107,12 @@ test("different explicitly configured sister companies stay ambiguous within a s
     recipientEmails: ["one@rail.hitachi.com", "two@cyber.hitachi.com"]
   }, rules, "work");
 
-  assert.equal(result.status, "ambiguous");
-  assert.deepEqual(result.customerIds, ["rail", "cyber"]);
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "cyber");
+  assert.equal(result.stage, "address");
 });
 
-test("preserves sender, recipient, subject, then body precedence", () => {
+test("From, To, and Cc form one address stage ordered like the displayed Customer Rules", () => {
   const rules = config([
     customer("sender", ["sender.com"]),
     customer("recipient", ["recipient.com"]),
@@ -124,21 +125,56 @@ test("preserves sender, recipient, subject, then body precedence", () => {
     subject: "subject.com escalation",
     body: "body project"
   }, rules, "work");
-  assert.equal(result.customerId, "sender");
-  assert.equal(result.stage, "sender");
+  assert.equal(result.customerId, "recipient");
+  assert.equal(result.stage, "address");
 });
 
-test("domain matches take precedence over keywords within a text stage", () => {
+test("subject precedes body after the combined address stage", () => {
   const rules = config([
-    customer("keyword", [], ["priority"]),
-    customer("domain", ["domain.example.com"], [])
+    customer("body-first-rule", [], ["body project"]),
+    customer("subject-later-rule", ["subject.example.com"])
+  ]);
+  const result = classifyMessage({
+    authorEmails: [],
+    recipientEmails: [],
+    subject: "Escalation for subject.example.com",
+    body: "body project"
+  }, rules, "work");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "subject-later-rule");
+  assert.equal(result.stage, "subject");
+});
+
+test("an exact domain is more specific than a keyword in one text stage", () => {
+  const rules = config([
+    customer("alpha-keyword", [], ["priority"]),
+    customer("zeta-domain", ["domain.example.com"], [])
   ]);
   const result = classifyMessage({
     authorEmails: [],
     recipientEmails: [],
     subject: "Priority issue for domain.example.com"
   }, rules, "work");
-  assert.equal(result.customerId, "domain");
+  assert.equal(result.customerId, "zeta-domain");
+  assert.equal(result.stage, "subject");
+});
+
+test("body also prefers an exact domain over a keyword", () => {
+  const rules = config([
+    customer("first", [], ["project alpha"]),
+    customer("second", ["second.example.com"])
+  ]);
+  const result = classifyMessage({
+    authorEmails: [],
+    recipientEmails: [],
+    subject: "No customer reference here",
+    body: "Project Alpha update from second.example.com"
+  }, rules, "work");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "second");
+  assert.equal(result.stage, "body");
 });
 
 test("free-text domain matching requires hostname boundaries", () => {
@@ -185,17 +221,64 @@ test("free-text domain matching also requires an exact configured hostname", () 
   );
 });
 
-test("ambiguous matches are skipped instead of choosing enumeration order", () => {
+test("displayed Customer Rules order wins independently of storage and address order", () => {
   const rules = config([
-    customer("one", ["one.example.com"]),
-    customer("two", ["two.example.com"])
+    customer("two", ["two.example.com"]),
+    customer("one", ["one.example.com"])
   ]);
   const result = classifyMessage({
     authorEmails: [],
-    recipientEmails: ["a@one.example.com", "b@two.example.com"]
+    recipientEmails: ["b@two.example.com", "a@one.example.com"]
   }, rules, "work");
-  assert.equal(result.status, "ambiguous");
-  assert.deepEqual(result.customerIds, ["one", "two"]);
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "one");
+  assert.equal(result.stage, "address");
+});
+
+test("an exact configured address is more specific than a domain match", () => {
+  const rules = config([
+    customer("alpha-domain", ["acme.com"]),
+    customer("zeta-address", [], [], ["person@acme.com"])
+  ]);
+  const result = classifyMessage({
+    authorEmails: ["person@acme.com"],
+    recipientEmails: []
+  }, rules, "work");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "zeta-address");
+  assert.equal(result.stage, "address");
+});
+
+test("address specificity is applied across the combined From, To, and Cc stage", () => {
+  const rules = config([
+    customer("alpha-sender-domain", ["sender.example.com"]),
+    customer("zeta-recipient-address", [], [], ["vip@recipient.example.com"])
+  ]);
+  const result = classifyMessage({
+    authorEmails: ["person@sender.example.com"],
+    recipientEmails: ["vip@recipient.example.com"]
+  }, rules, "work");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "zeta-recipient-address");
+  assert.equal(result.stage, "address");
+});
+
+test("displayed Customer Rules order wins over storage and domain occurrence order", () => {
+  const rules = config([
+    customer("zeta", ["zeta.example.com"]),
+    customer("alpha", ["alpha.example.com"])
+  ]);
+  const result = classifyMessage({
+    authorEmails: [],
+    recipientEmails: [],
+    subject: "zeta.example.com depends on alpha.example.com"
+  }, rules, "work");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.customerId, "alpha");
+  assert.equal(result.stage, "subject");
 });
 
 test("customer account scope is honored", () => {

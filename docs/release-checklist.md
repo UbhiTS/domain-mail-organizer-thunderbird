@@ -5,10 +5,8 @@ Never reuse, move, or overwrite a published version tag.
 
 ## Release gates
 
-Status for the current `0.1.12` working tree: automated checks are complete,
-but the disposable Thunderbird 140+/real-provider acceptance run below has not
-yet been executed. Do not tag or submit this version until that evidence is
-recorded.
+Status for the current `0.1.13` working tree: run and record every gate below
+before tagging or submitting this version.
 
 - [ ] Start from a clean checkout of the intended `main` commit.
 - [ ] Confirm GitHub's required `Build` check passed on that exact commit.
@@ -26,8 +24,9 @@ recorded.
 - [ ] At minimum, test a real Gmail/Google Workspace or IMAP account plus:
       setup with ordinary and special-use Archive-name collisions; exact-domain
       routing; automatic move confirmation timing; restart/offline recovery;
-      folder rename/delete; address-book outage; 4,000-message Inbox processing;
-      and repeat-safe existing-mail contact backfill.
+      folder rename/delete; exact-name address-book reuse, ambiguity, and
+      read-only/remote failures; 4,000-message Inbox processing; and repeat-safe
+      existing-mail contact backfill.
 - [ ] Resolve every blocker/high finding. Document any accepted lower-severity
       limitation in README, PRIVACY, and version notes.
 
