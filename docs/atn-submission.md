@@ -1,9 +1,9 @@
 # Thunderbird Add-ons submission notes
 
-Use this checklist when submitting version 0.1.13 to addons.thunderbird.net
+Use this checklist when submitting version 0.1.14 to addons.thunderbird.net
 (ATN).
 
-Before pasting the reviewer links below, manually create/push the `v0.1.13` tag
+Before pasting the reviewer links below, manually create/push the `v0.1.14` tag
 or publish the corresponding GitHub Release so the source snapshot exists.
 
 ## Validation screen
@@ -76,7 +76,7 @@ Paste the following into **Notes for Reviewers**:
 >
 > Source repository and tag:
 > https://github.com/UbhiTS/domain-mail-organizer-thunderbird
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.13
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/tree/v0.1.14
 >
 > All first-party packaged JavaScript, HTML, and CSS are readable source files.
 > First-party code is not minified, transpiled, bundled, or obfuscated, and the
@@ -89,7 +89,7 @@ Paste the following into **Notes for Reviewers**:
 > 1. npm ci --ignore-scripts
 > 2. npm run check
 > 3. npm run build
-> Output: artifacts/domain-mail-organizer-0.1.13.xpi and .zip.
+> Output: artifacts/domain-mail-organizer-0.1.14.xpi and .zip.
 >
 > Third-party library: `psl` 1.15.0, vendored unmodified as
 > extension/vendor/psl.mjs. The included file is the upstream generated
@@ -183,7 +183,7 @@ Paste the following into **Notes for Reviewers**:
 > transmits no mailbox data or telemetry. It never updates, merges, or deletes
 > existing contacts. Managed books and contacts remain user-owned after the
 > feature is disabled or the extension is uninstalled. Privacy statement:
-> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.13/PRIVACY.md
+> https://github.com/UbhiTS/domain-mail-organizer-thunderbird/blob/v0.1.14/PRIVACY.md
 
 ## Source-code upload field
 
@@ -193,7 +193,7 @@ file linked above, with the readable source for that tagged release also linked.
 A separate source upload is therefore generally unnecessary. If ATN requests
 one, use the repository tag archive—not the installable release ZIP:
 
-https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.13.zip
+https://github.com/UbhiTS/domain-mail-organizer-thunderbird/archive/refs/tags/v0.1.14.zip
 
 The archive contains `package.json`, `package-lock.json`, the build script, and
 all extension sources required to reproduce the XPI.

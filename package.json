@@ -1,6 +1,6 @@
 {
   "name": "domain-mail-organizer-thunderbird",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "type": "module",
   "description": "A Thunderbird MailExtension that organizes customer email and captures customer and approved internal contacts.",

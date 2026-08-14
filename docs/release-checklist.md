@@ -5,7 +5,7 @@ Never reuse, move, or overwrite a published version tag.
 
 ## Release gates
 
-Status for the current `0.1.13` working tree: run and record every gate below
+Status for the current `0.1.14` working tree: run and record every gate below
 before tagging or submitting this version.
 
 - [ ] Start from a clean checkout of the intended `main` commit.
