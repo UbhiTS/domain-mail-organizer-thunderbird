@@ -28,7 +28,7 @@
     "build": "node scripts/build.js"
   },
   "devDependencies": {
-    "web-ext": "10.6.0",
+    "web-ext": "10.7.0",
     "yazl": "3.3.1"
   }
 }
